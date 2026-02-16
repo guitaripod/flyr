@@ -2,7 +2,7 @@ use comfy_table::{Table, ContentArrangement, presets::UTF8_FULL};
 
 use crate::model::SearchResult;
 
-fn format_price(price: Option<i64>, currency: &str) -> String {
+pub fn format_price(price: Option<i64>, currency: &str) -> String {
     let p = match price {
         Some(p) => p,
         None => return "—".to_string(),
