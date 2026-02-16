@@ -1,5 +1,10 @@
 # flyr
 
+[![License: GPL-3.0](https://img.shields.io/github/license/guitaripod/flyr)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange)](https://www.rust-lang.org)
+[![GitHub stars](https://img.shields.io/github/stars/guitaripod/flyr)](https://github.com/guitaripod/flyr/stargazers)
+[![GitHub last commit](https://img.shields.io/github/last-commit/guitaripod/flyr)](https://github.com/guitaripod/flyr/commits/master)
+
 Google Flights from your terminal. Single binary, no API key, no browser.
 
 > **prompt:** find the cheapest round-trip from Helsinki to somewhere warm, departing tomorrow
