@@ -1,5 +1,6 @@
 # flyr
 
+[![crates.io](https://img.shields.io/crates/v/flyr-cli)](https://crates.io/crates/flyr-cli)
 [![License: GPL-3.0](https://img.shields.io/github/license/guitaripod/flyr)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange)](https://www.rust-lang.org)
 [![GitHub stars](https://img.shields.io/github/stars/guitaripod/flyr)](https://github.com/guitaripod/flyr/stargazers)
