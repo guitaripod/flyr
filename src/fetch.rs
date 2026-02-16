@@ -9,6 +9,7 @@ use crate::error::{self, FlightError};
 
 const BASE_URL: &str = "https://www.google.com/travel/flights";
 
+#[derive(Clone)]
 pub struct FetchOptions {
     pub proxy: Option<String>,
     pub timeout: u64,
