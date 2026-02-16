@@ -36,7 +36,7 @@ Built for people who book flights programmatically -- whether that's a bash loop
 ## Install
 
 ```bash
-cargo install --path .
+cargo install flyr-cli
 ```
 
 Requires `cmake`, `perl`, and `clang` for the BoringSSL build (wreq dependency).
