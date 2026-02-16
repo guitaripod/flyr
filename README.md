@@ -7,7 +7,7 @@
 
 Google Flights from your terminal. Single binary, no API key, no browser.
 
-> **prompt:** find the cheapest round-trip from Helsinki to somewhere warm, departing tomorrow
+> **prompt:** find the cheapest round-trip from Helsinki to somewhere warm, departing tomorrow. open the best ones in my browser.
 >
 > **agent:** *searches 20 destinations in parallel*
 >
@@ -20,8 +20,10 @@ Google Flights from your terminal. Single binary, no API key, no browser.
 > | 5 | LPA | Gran Canaria | €443 | Norwegian direct | 0 | 21°C |
 > | 6 | SIN | Singapore | €710 | KLM via AMS | 1 | 31°C |
 > | 7 | BKK | Bangkok | €859 | Finnair/Qatar via DOH | 1 | 33°C |
+>
+> *Opens Antalya, Gran Canaria, and Singapore on Google Flights for booking.*
 
-That table was compiled from 20 parallel `flyr` calls. Each search takes 1-2 seconds. No browser, no clicking, no cookie banners.
+20 parallel `flyr` calls. Each search takes 1-2 seconds. No browser, no clicking, no cookie banners. Pick the flights you want and the agent opens them directly on Google Flights to book.
 
 ## Why
 
