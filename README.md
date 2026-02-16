@@ -1,8 +1,14 @@
 # flyr
 
-A native Rust CLI that scrapes Google Flights. Single static binary, no API key, no browser, no Python.
+Google Flights from your terminal. Single binary, no API key, no browser.
 
-Inspired by the [fast-flights](https://github.com/AWeirdDev/flights) Python library, rewritten from scratch in Rust with fixes for GDPR consent walls, flaky HTML parsing, and Python startup overhead.
+## Why
+
+Google Flights has no API. The website is slow, requires a browser, and you can only search one route at a time. If you want to compare 10 destinations you're clicking through 10 separate searches, waiting for each page to load, fighting cookie banners.
+
+flyr fixes this. It's a single static binary that scrapes Google Flights directly. Searches complete in 1-2 seconds. Run them in parallel. Pipe JSON into `jq`, feed it to scripts, or let an AI agent search dozens of routes and compile results for you.
+
+Built for people who book flights programmatically -- whether that's a bash loop, a Python script, or an LLM agent that can run shell commands.
 
 ## Install
 
@@ -17,29 +23,44 @@ Arch: `pacman -S cmake perl clang`
 ## Usage
 
 ```bash
-# One-way
 flyr search -f HEL -t BKK -d 2026-03-01
-
-# Round-trip
 flyr search -f LAX -t NRT -d 2026-05-01 --return-date 2026-05-15
+flyr search -f HEL -t BKK -d 2026-03-01 --json --currency EUR
+```
 
-# Multi-city
-flyr search --leg "2026-03-01 LAX NRT" --leg "2026-03-10 NRT SEA"
+### Concurrent searches
 
-# Filters
-flyr search -f HEL -t BCN -d 2026-03-01 --seat business --max-stops 1 --airlines AY,IB
+Search 5 destinations at once:
 
-# JSON output
-flyr search -f HEL -t BKK -d 2026-03-01 --json --pretty
+```bash
+for dest in BKK SIN KUL HKT DPS; do
+  flyr search -f HEL -t $dest -d 2026-03-01 --return-date 2026-03-08 --json --currency EUR &
+done | jq -s '[.[] | .flights[0] | {dest: .segments[0].to_airport.code, price, airlines}] | sort_by(.price)'
+```
 
-# Proxy + timeout
-flyr search -f JFK -t LHR -d 2026-04-01 --proxy socks5://127.0.0.1:1080 --timeout 60
+### AI agent usage
 
-# Multiple passengers
-flyr search -f HEL -t ATH -d 2026-03-01 --adults 2 --children 1
+flyr's structured JSON output makes it a natural tool for LLM agents. An agent can:
 
-# Currency and language
+- Search dozens of routes in parallel
+- Filter by price, stops, departure time
+- Compare destinations and compile results
+- Open the best options directly in a browser
+
+```bash
+flyr search -f HEL -t BKK -d 2026-02-17 --return-date 2026-02-24 --json --currency EUR
+```
+
+Returns structured data the agent can parse and reason about -- prices, airlines, segments, times, carbon emissions, all as clean JSON.
+
+### Localization
+
+Results adapt to any language and currency Google Flights supports:
+
+```bash
 flyr search -f HEL -t BKK -d 2026-03-01 --currency EUR --lang fi
+flyr search -f HEL -t BKK -d 2026-03-01 --currency JPY --lang ja
+flyr search -f HEL -t BKK -d 2026-03-01 --currency THB --lang th
 ```
 
 <details>
@@ -132,18 +153,18 @@ flyr search -f HEL -t BKK -d 2026-03-01 --json --pretty
 }
 ```
 
-Pipe to `jq` for scripting:
+<details>
+<summary><strong>jq recipes</strong></summary>
 
 ```bash
-# Cheapest price
 flyr search -f HEL -t BKK -d 2026-03-01 --json | jq '.flights | sort_by(.price) | first'
 
-# All nonstop flights
 flyr search -f JFK -t LHR -d 2026-04-01 --json | jq '[.flights[] | select(.segments | length == 1)]'
 
-# Just prices and airlines
 flyr search -f HEL -t BCN -d 2026-03-01 --json | jq '.flights[] | {airlines, price}'
 ```
+
+</details>
 
 ## Exit codes
 
