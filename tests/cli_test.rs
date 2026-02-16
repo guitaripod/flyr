@@ -23,7 +23,7 @@ fn top_level_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("flyr 0.1.0"));
+        .stdout(predicate::str::contains("flyr 1.1.0"));
 }
 
 #[test]
@@ -51,12 +51,15 @@ fn search_help_shows_all_sections() {
         .stdout(predicate::str::contains("--pretty"))
         .stdout(predicate::str::contains("--proxy <URL>"))
         .stdout(predicate::str::contains("--timeout <SECS>"))
+        .stdout(predicate::str::contains("--top <N>"))
+        .stdout(predicate::str::contains("--compact"))
         .stdout(predicate::str::contains("Examples:"))
         .stdout(predicate::str::contains("One-way:"))
         .stdout(predicate::str::contains("Round-trip:"))
         .stdout(predicate::str::contains("Multi-city:"))
         .stdout(predicate::str::contains("Business:"))
-        .stdout(predicate::str::contains("JSON output:"));
+        .stdout(predicate::str::contains("JSON output:"))
+        .stdout(predicate::str::contains("Agent-optimized:"));
 }
 
 #[test]
@@ -344,4 +347,33 @@ fn unknown_subcommand_fails() {
         .arg("fly")
         .assert()
         .failure();
+}
+
+#[test]
+fn leg_with_multi_dest_fails() {
+    cmd()
+        .args([
+            "search", "--leg", "2026-03-01 HEL BCN", "-t", "BCN,ATH",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--leg cannot be used with comma-separated"));
+}
+
+#[test]
+fn top_level_help_shows_agent_example() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--compact --top 3"));
+}
+
+#[test]
+fn search_long_about_mentions_agents() {
+    cmd()
+        .args(["search", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("For AI agents"));
 }
