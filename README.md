@@ -2,11 +2,27 @@
 
 Google Flights from your terminal. Single binary, no API key, no browser.
 
+> **prompt:** find the cheapest round-trip from Helsinki to somewhere warm, departing tomorrow
+>
+> **agent:** *searches 20 destinations in parallel*
+>
+> | # | Dest | City | Price | Route | Stops | Temp |
+> |---|------|------|-------|-------|-------|------|
+> | 1 | AYT | Antalya | **€236** | Pegasus direct | 0 | 15°C |
+> | 2 | NCE | Nice | €260 | Air France via CDG | 1 | 12°C |
+> | 3 | ATH | Athens | €331 | KLM via AMS | 1 | 13°C |
+> | 4 | RAK | Marrakech | €347 | Finnair/TAP via LIS | 1 | 20°C |
+> | 5 | LPA | Gran Canaria | €443 | Norwegian direct | 0 | 21°C |
+> | 6 | SIN | Singapore | €710 | KLM via AMS | 1 | 31°C |
+> | 7 | BKK | Bangkok | €859 | Finnair/Qatar via DOH | 1 | 33°C |
+
+That table was compiled from 20 parallel `flyr` calls. Each search takes 1-2 seconds. No browser, no clicking, no cookie banners.
+
 ## Why
 
 Google Flights has no API. The website is slow, requires a browser, and you can only search one route at a time. If you want to compare 10 destinations you're clicking through 10 separate searches, waiting for each page to load, fighting cookie banners.
 
-flyr fixes this. It's a single static binary that scrapes Google Flights directly. Searches complete in 1-2 seconds. Run them in parallel. Pipe JSON into `jq`, feed it to scripts, or let an AI agent search dozens of routes and compile results for you.
+flyr fixes this. It's a single static binary that scrapes Google Flights directly. Run searches in parallel. Pipe JSON into `jq`, feed it to scripts, or let an AI agent search dozens of routes and compile results for you -- like the table above.
 
 Built for people who book flights programmatically -- whether that's a bash loop, a Python script, or an LLM agent that can run shell commands.
 
