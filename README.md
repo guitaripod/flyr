@@ -31,7 +31,7 @@ Google Flights from your terminal. Single binary, no API key, no browser.
 > €710 | HEL>AMS>SIN | 16h45m | 1 stop AMS | KLM | Mar01 07:45>06:30
 > === BKK ===
 > €859 | HEL>DOH>BKK | 14h20m | 1 stop DOH | Finnair, Qatar | Mar01 17:00>11:20
-> Opening: https://www.google.com/travel/flights?q=flights+from+HEL+to+LPA+on+2026-03-01+return+2026-03-08
+> Opening: https://www.google.com/travel/flights/search?tfs=GhoSCjIwMjYtMDMtMDFqBRIDSEVMcgUSA0xQQRoaEgoyMDI2LTAzLTA4agUSA0xQQXIFEgNIRUxCAQFIAZgBAQ&tfu=EgYIABAAGAA&curr=EUR&hl=en
 One command, 7 destinations, ~5k tokens. No browser, no clicking, no cookie banners. Pick the flights you want and the agent opens them directly on Google Flights to book.
 
 ## Why
@@ -316,10 +316,10 @@ src/
 ├── table.rs    Human-readable table rendering with currency symbols
 └── error.rs    Error types with actionable messages
 tests/
-├── cli_test.rs     35 tests -- arg parsing, help output, error messages, exit codes
+├── cli_test.rs     32 tests -- arg parsing, help output, error messages, exit codes
 ├── parse_test.rs   13 tests -- script extraction, JSON parsing, edge cases
 ├── proto_test.rs    6 tests -- byte-level protobuf correctness
-└── query_test.rs   20 tests -- validation rules, date handling, leap years
+└── query_test.rs   23 tests -- validation rules, date handling, leap years, browser URLs
 ```
 
 </details>
