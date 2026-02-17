@@ -552,7 +552,7 @@ async fn main() {
                             from_airport: from.clone(),
                             to_airport: dest.clone(),
                             max_stops: args.max_stops,
-                            airlines: None,
+                            airlines: airlines.clone(),
                         }];
 
                         if args.return_date.is_some() {
@@ -561,14 +561,14 @@ async fn main() {
                                 from_airport: dest.clone(),
                                 to_airport: from.clone(),
                                 max_stops: args.max_stops,
-                                airlines: None,
+                                airlines: airlines.clone(),
                             });
                         }
 
                         let query_params = QueryParams {
                             legs,
-                            passengers: Passengers::default(),
-                            seat: Seat::Economy,
+                            passengers: passengers.clone(),
+                            seat: seat.clone(),
                             trip: trip.clone(),
                             language: args.lang.clone(),
                             currency: args.currency.clone(),
