@@ -1,4 +1,4 @@
-use base64::engine::general_purpose::STANDARD;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 
 use crate::error::FlightError;
@@ -200,36 +200,19 @@ impl SearchQuery {
 }
 
 pub fn to_google_flights_url(params: &QueryParams) -> String {
-    let leg = params.legs.first().expect("at least one leg required");
-    let from = &leg.from_airport;
-    let to = &leg.to_airport;
-    let depart = &leg.date;
+    let encoded = proto::encode(&params.legs, &params.passengers, &params.seat, &params.trip);
+    let tfs = URL_SAFE_NO_PAD.encode(&encoded);
 
-    let base = match params.trip {
-        TripType::RoundTrip => {
-            let ret = params.legs.get(1).map(|l| l.date.as_str()).unwrap_or("");
-            format!(
-                "https://www.google.com/travel/flights?q=flights+from+{}+to+{}+on+{}+return+{}",
-                from, to, depart, ret
-            )
-        }
-        TripType::OneWay => {
-            format!(
-                "https://www.google.com/travel/flights?q=one+way+flights+from+{}+to+{}+on+{}",
-                from, to, depart
-            )
-        }
-        _ => {
-            format!(
-                "https://www.google.com/travel/flights?q=flights+from+{}+to+{}+on+{}",
-                from, to, depart
-            )
-        }
-    };
+    let mut url = format!(
+        "https://www.google.com/travel/flights/search?tfs={tfs}&tfu=EgYIABAAGAA"
+    );
 
-    if !params.currency.is_empty() && params.currency != "USD" {
-        format!("{base}&curr={}", params.currency)
-    } else {
-        base
+    if !params.currency.is_empty() {
+        url.push_str(&format!("&curr={}", params.currency));
     }
+    if !params.language.is_empty() {
+        url.push_str(&format!("&hl={}", params.language));
+    }
+
+    url
 }
