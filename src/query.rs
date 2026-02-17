@@ -1,5 +1,5 @@
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 
 use crate::error::FlightError;
 use crate::proto;
@@ -196,5 +196,40 @@ impl SearchQuery {
             Self::Structured(q) => q.to_url_params(),
             Self::NaturalLanguage(text) => vec![("q".to_string(), text.clone())],
         }
+    }
+}
+
+pub fn to_google_flights_url(params: &QueryParams) -> String {
+    let leg = params.legs.first().expect("at least one leg required");
+    let from = &leg.from_airport;
+    let to = &leg.to_airport;
+    let depart = &leg.date;
+
+    let base = match params.trip {
+        TripType::RoundTrip => {
+            let ret = params.legs.get(1).map(|l| l.date.as_str()).unwrap_or("");
+            format!(
+                "https://www.google.com/travel/flights?q=flights+from+{}+to+{}+on+{}+return+{}",
+                from, to, depart, ret
+            )
+        }
+        TripType::OneWay => {
+            format!(
+                "https://www.google.com/travel/flights?q=one+way+flights+from+{}+to+{}+on+{}",
+                from, to, depart
+            )
+        }
+        _ => {
+            format!(
+                "https://www.google.com/travel/flights?q=flights+from+{}+to+{}+on+{}",
+                from, to, depart
+            )
+        }
+    };
+
+    if !params.currency.is_empty() && params.currency != "USD" {
+        format!("{base}&curr={}", params.currency)
+    } else {
+        base
     }
 }

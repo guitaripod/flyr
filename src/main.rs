@@ -163,6 +163,9 @@ struct SearchArgs {
     #[arg(long, help = "Output as pretty-printed JSON")]
     pretty: bool,
 
+    #[arg(long, help = "Open results in Google Flights")]
+    open: bool,
+
     #[arg(long, value_name = "URL", help = "HTTP or SOCKS5 proxy")]
     proxy: Option<String>,
 
@@ -179,6 +182,18 @@ fn apply_top(result: &mut SearchResult, n: usize) {
         .flights
         .sort_by_key(|f| f.price.unwrap_or(i64::MAX));
     result.flights.truncate(n);
+}
+
+fn open_browser(query_params: &QueryParams, json_mode: bool) -> ! {
+    let url = flyr::generate_browser_url(query_params);
+    println!("Opening: {url}");
+    if let Err(e) = open::that(&url) {
+        die(
+            &FlightError::Validation(format!("failed to open browser: {e}")),
+            json_mode,
+        );
+    }
+    std::process::exit(0);
 }
 
 fn error_code(err: &FlightError) -> i32 {
@@ -509,6 +524,63 @@ async fn main() {
                     timeout: args.timeout,
                 };
 
+                if args.open {
+                    let from = match args.from.as_ref() {
+                        Some(f) => f.to_uppercase(),
+                        None => die(
+                            &FlightError::Validation("--from is required (or use --leg)".into()),
+                            json_mode,
+                        ),
+                    };
+                    let date = match args.date.as_ref() {
+                        Some(d) => d.clone(),
+                        None => die(
+                            &FlightError::Validation("--date is required (or use --leg)".into()),
+                            json_mode,
+                        ),
+                    };
+
+                    let trip = if args.return_date.is_some() {
+                        TripType::RoundTrip
+                    } else {
+                        TripType::OneWay
+                    };
+
+                    for dest in &destinations {
+                        let mut legs = vec![FlightLeg {
+                            date: date.clone(),
+                            from_airport: from.clone(),
+                            to_airport: dest.clone(),
+                            max_stops: args.max_stops,
+                            airlines: None,
+                        }];
+
+                        if args.return_date.is_some() {
+                            legs.push(FlightLeg {
+                                date: args.return_date.clone().unwrap(),
+                                from_airport: dest.clone(),
+                                to_airport: from.clone(),
+                                max_stops: args.max_stops,
+                                airlines: None,
+                            });
+                        }
+
+                        let query_params = QueryParams {
+                            legs,
+                            passengers: Passengers::default(),
+                            seat: Seat::Economy,
+                            trip: trip.clone(),
+                            language: args.lang.clone(),
+                            currency: args.currency.clone(),
+                        };
+
+                        let url = flyr::generate_browser_url(&query_params);
+                        println!("Opening: {url}");
+                        let _ = open::that(&url);
+                    }
+                    return;
+                }
+
                 let mut join_set = JoinSet::new();
 
                 for dest in &destinations {
@@ -542,7 +614,11 @@ async fn main() {
                         currency: args.currency.clone(),
                     };
 
-                    if let Err(e) = query_params.validate() {
+                if args.open {
+                    open_browser(&query_params, json_mode);
+                }
+
+                if let Err(e) = query_params.validate() {
                         die(&e, json_mode);
                     }
 
@@ -611,6 +687,10 @@ async fn main() {
                     language: args.lang.clone(),
                     currency: args.currency.clone(),
                 };
+
+                if args.open {
+                    open_browser(&query_params, json_mode);
+                }
 
                 if let Err(e) = query_params.validate() {
                     die(&e, json_mode);
