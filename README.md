@@ -32,28 +32,6 @@ Google Flights from your terminal. Single binary, no API key, no browser.
 > === BKK ===
 > €859 | HEL>DOH>BKK | 14h20m | 1 stop DOH | Finnair, Qatar | Mar01 17:00>11:20
 > Opening: https://www.google.com/travel/flights?q=flights+from+HEL+to+LPA+on+2026-03-01+return+2026-03-08
-> ```
-> flyr search -f HEL -t AYT,NCE,ATH,RAK,LPA,SIN,BKK -d 2026-03-01 --compact --top 1 --currency EUR
-> ```
->
-> **output:**
-> ```
-> === AYT ===
-> €236 | HEL>SAW>AYT | 7h15m | 1 stop SAW | Pegasus | Mar01 06:30>15:45
-> === NCE ===
-> €260 | HEL>CDG>NCE | 5h50m | 1 stop CDG | Air France | Mar01 09:10>14:00
-> === ATH ===
-> €331 | HEL>AMS>ATH | 8h20m | 1 stop AMS | KLM | Mar01 07:45>18:05
-> === RAK ===
-> €347 | HEL>LIS>RAK | 10h05m | 1 stop LIS | Finnair, TAP | Mar01 11:00>21:05
-> === LPA ===
-> €443 | HEL>LPA | 6h30m | nonstop | Norwegian | Mar01 08:00>14:30
-> === SIN ===
-> €710 | HEL>AMS>SIN | 16h45m | 1 stop AMS | KLM | Mar01 07:45>06:30
-> === BKK ===
-> €859 | HEL>DOH>BKK | 14h20m | 1 stop DOH | Finnair, Qatar | Mar01 17:00>11:20
-> ```
-
 One command, 7 destinations, ~5k tokens. No browser, no clicking, no cookie banners. Pick the flights you want and the agent opens them directly on Google Flights to book.
 
 ## Why
