@@ -7,6 +7,15 @@ use wreq_util::Emulation;
 
 use crate::error::{self, FlightError};
 
+fn cache_buster() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string()
+}
+
 const BASE_URL: &str = "https://www.google.com/travel/flights";
 
 #[derive(Clone)]
@@ -49,9 +58,12 @@ pub async fn fetch_html(
 
     let client = builder.build().map_err(error::from_http_error)?;
 
+    let mut params = params.to_vec();
+    params.push(("cx".to_string(), cache_buster()));
+
     let response = client
         .get(BASE_URL)
-        .query(params)
+        .query(&params)
         .send()
         .await
         .map_err(error::from_http_error)?;
