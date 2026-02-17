@@ -1,4 +1,4 @@
-use flyr::query::{FlightLeg, Passengers, QueryParams, Seat, TripType};
+use flyr::query::{to_google_flights_url, FlightLeg, Passengers, QueryParams, Seat, TripType};
 
 fn make_valid_query() -> QueryParams {
     QueryParams {
@@ -177,4 +177,30 @@ fn empty_lang_omitted_from_params() {
     q.language = "".into();
     let params = q.to_url_params();
     assert!(!params.iter().any(|(k, _)| k == "hl"));
+}
+
+#[test]
+fn browser_url_uses_tfs_path() {
+    let q = make_valid_query();
+    let url = to_google_flights_url(&q);
+    assert!(url.starts_with("https://www.google.com/travel/flights/search?tfs="));
+}
+
+#[test]
+fn browser_url_contains_tfu() {
+    let q = make_valid_query();
+    let url = to_google_flights_url(&q);
+    assert!(url.contains("&tfu=EgYIABAAGAA"));
+}
+
+#[test]
+fn browser_url_tfs_is_url_safe_base64() {
+    let q = make_valid_query();
+    let url = to_google_flights_url(&q);
+    let tfs_start = url.find("tfs=").unwrap() + 4;
+    let tfs_end = url[tfs_start..].find('&').unwrap() + tfs_start;
+    let tfs_value = &url[tfs_start..tfs_end];
+    assert!(!tfs_value.contains('+'), "tfs contains '+' (not URL-safe)");
+    assert!(!tfs_value.contains('/'), "tfs contains '/' (not URL-safe)");
+    assert!(!tfs_value.contains('='), "tfs contains '=' (has padding)");
 }

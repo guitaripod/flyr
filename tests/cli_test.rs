@@ -23,7 +23,7 @@ fn top_level_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("flyr 1.1.0"));
+        .stdout(predicate::str::contains("flyr 1.2.0"));
 }
 
 #[test]
