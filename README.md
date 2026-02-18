@@ -11,11 +11,13 @@ Google Flights from your terminal. Single binary, no API key, no browser.
 > **prompt:** find the cheapest round-trip from Helsinki to somewhere warm, departing tomorrow. open the best one in my browser.
 >
 > **agent runs:**
+>
 > ```
 > flyr search -f HEL -t AYT,NCE,ATH,RAK,LPA,SIN,BKK -d 2026-03-01 --compact --top 1 --currency EUR --return-date 2026-03-08 --open
 > ```
 
 > **output:**
+>
 > ```
 > === AYT ===
 > €236 | HEL>SAW>AYT | 7h15m | 1 stop SAW | Pegasus | Mar01 06:30>15:45
@@ -32,7 +34,8 @@ Google Flights from your terminal. Single binary, no API key, no browser.
 > === BKK ===
 > €859 | HEL>DOH>BKK | 14h20m | 1 stop DOH | Finnair, Qatar | Mar01 17:00>11:20
 > Opening: https://www.google.com/travel/flights/search?tfs=GhoSCjIwMjYtMDMtMDFqBRIDSEVMcgUSA0xQQRoaEgoyMDI2LTAzLTA4agUSA0xQQXIFEgNIRUxCAQFIAZgBAQ&tfu=EgYIABAAGAA&curr=EUR&hl=en
-One command, 7 destinations, ~5k tokens. No browser, no clicking, no cookie banners. Pick the flights you want and the agent opens them directly on Google Flights to book.
+> One command, 7 destinations, ~5k tokens. No browser, no clicking, no cookie banners. Pick the flights you want and the agent opens them directly on Google Flights to book.
+> ```
 
 ## Why
 
@@ -73,10 +76,8 @@ flyr is designed for LLM agents. Three flags minimize token consumption:
 flyr search -f HEL -t BCN,ATH,AYT -d 2026-03-01 --compact --top 3 --currency EUR
 ```
 
-Before (v1.0): 7 separate invocations, ASCII tables, all results → ~44k tokens.
-After (v1.1): 1 invocation, compact output, top 3 per destination → ~5k tokens.
+flyr is designed for LLM agents. Three flags minimize token consumption:
 
-An agent can:
 - Search dozens of routes in one call
 - Filter by price, stops, departure time
 - Compare destinations and compile results
@@ -151,8 +152,9 @@ OUTPUT:
   --json                      JSON to stdout
   --pretty                    Pretty-printed JSON to stdout
   --open                      Open results in Google Flights
-  --currency <CODE>            [default: USD]
-  --lang <CODE>               [default: en]
+  --url                       Output Google Flights URL only (for AI agents)
+  --currency <CODE>           [default: USD]
+  --lang <CODE>              [default: en]
 
 CONNECTION:
   --proxy <URL>                HTTP or SOCKS5 proxy
@@ -201,8 +203,20 @@ flyr search -f HEL -t BKK -d 2026-03-01 --json --pretty
         {
           "from_airport": { "code": "HEL", "name": "Helsinki Airport" },
           "to_airport": { "code": "BKK", "name": "Suvarnabhumi Airport" },
-          "departure": { "year": 2026, "month": 3, "day": 1, "hour": 17, "minute": 0 },
-          "arrival": { "year": 2026, "month": 3, "day": 2, "hour": 7, "minute": 15 },
+          "departure": {
+            "year": 2026,
+            "month": 3,
+            "day": 1,
+            "hour": 17,
+            "minute": 0
+          },
+          "arrival": {
+            "year": 2026,
+            "month": 3,
+            "day": 2,
+            "hour": 7,
+            "minute": 15
+          },
           "duration_minutes": 675,
           "aircraft": "Airbus A350"
         }
@@ -233,19 +247,24 @@ flyr search -f HEL -t BCN -d 2026-03-01 --json | jq '.flights[] | {airlines, pri
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 2 | Validation error (bad airport code, invalid date, etc.) |
-| 3 | Network error (timeout, DNS, TLS, proxy) |
-| 4 | Rate limited or blocked by Google |
-| 5 | Unexpected HTTP status |
-| 6 | Parse error (Google changed their page structure) |
+| Code | Meaning                                                 |
+| ---- | ------------------------------------------------------- |
+| 0    | Success                                                 |
+| 2    | Validation error (bad airport code, invalid date, etc.) |
+| 3    | Network error (timeout, DNS, TLS, proxy)                |
+| 4    | Rate limited or blocked by Google                       |
+| 5    | Unexpected HTTP status                                  |
+| 6    | Parse error (Google changed their page structure)       |
 
 In `--json` mode, errors are structured JSON to stdout:
 
 ```json
-{ "error": { "kind": "invalid_airport", "message": "invalid airport code \"XX\" -- must be exactly 3 letters" } }
+{
+  "error": {
+    "kind": "invalid_airport",
+    "message": "invalid airport code \"XX\" -- must be exactly 3 letters"
+  }
+}
 ```
 
 In human mode, errors go to stderr.

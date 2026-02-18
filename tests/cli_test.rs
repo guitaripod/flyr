@@ -11,7 +11,9 @@ fn top_level_help() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Search Google Flights from the terminal"))
+        .stdout(predicate::str::contains(
+            "Search Google Flights from the terminal",
+        ))
         .stdout(predicate::str::contains("search"))
         .stdout(predicate::str::contains("Examples:"))
         .stdout(predicate::str::contains("flyr search -f JFK -t LHR"));
@@ -23,7 +25,7 @@ fn top_level_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("flyr 1.3.1"));
+        .stdout(predicate::str::contains("flyr 1.4.0"));
 }
 
 #[test]
@@ -71,7 +73,9 @@ fn search_help_shows_value_hints() {
         .stdout(predicate::str::contains("Departure airport IATA code"))
         .stdout(predicate::str::contains("Arrival airport IATA code"))
         .stdout(predicate::str::contains("Departure date in YYYY-MM-DD"))
-        .stdout(predicate::str::contains("economy, premium-economy, business, first"))
+        .stdout(predicate::str::contains(
+            "economy, premium-economy, business, first",
+        ))
         .stdout(predicate::str::contains("one-way, round-trip, multi-city"))
         .stdout(predicate::str::contains("0 = nonstop only"))
         .stdout(predicate::str::contains("round-trip"));
@@ -106,10 +110,7 @@ fn search_help_shows_defaults() {
 
 #[test]
 fn short_flags_work() {
-    let output = cmd()
-        .args(["search", "-h"])
-        .assert()
-        .success();
+    let output = cmd().args(["search", "-h"]).assert().success();
     let stdout = String::from_utf8_lossy(&output.get_output().stdout);
     assert!(stdout.contains("-f, --from"));
     assert!(stdout.contains("-t, --to"));
@@ -164,7 +165,17 @@ fn invalid_airport_code_numeric() {
 #[test]
 fn invalid_seat_class() {
     cmd()
-        .args(["search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01", "--seat", "luxury"])
+        .args([
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--seat",
+            "luxury",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid seat class"));
@@ -173,7 +184,17 @@ fn invalid_seat_class() {
 #[test]
 fn invalid_trip_type() {
     cmd()
-        .args(["search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01", "--trip", "zigzag"])
+        .args([
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--trip",
+            "zigzag",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid trip type"));
@@ -192,8 +213,17 @@ fn invalid_date_format() {
 fn too_many_passengers() {
     cmd()
         .args([
-            "search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01",
-            "--adults", "5", "--children", "5",
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--adults",
+            "5",
+            "--children",
+            "5",
         ])
         .assert()
         .failure()
@@ -204,8 +234,17 @@ fn too_many_passengers() {
 fn infants_exceed_adults() {
     cmd()
         .args([
-            "search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01",
-            "--adults", "1", "--infants-on-lap", "2",
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--adults",
+            "1",
+            "--infants-on-lap",
+            "2",
         ])
         .assert()
         .failure()
@@ -225,7 +264,14 @@ fn malformed_leg_fails() {
 fn json_mode_error_is_structured() {
     let output = cmd()
         .args([
-            "search", "-f", "X1", "-t", "BCN", "-d", "2026-03-01", "--json",
+            "search",
+            "-f",
+            "X1",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--json",
         ])
         .assert()
         .failure();
@@ -242,8 +288,18 @@ fn json_mode_error_is_structured() {
 fn json_mode_validation_error() {
     let output = cmd()
         .args([
-            "search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01",
-            "--adults", "5", "--children", "5", "--json",
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--adults",
+            "5",
+            "--children",
+            "5",
+            "--json",
         ])
         .assert()
         .failure();
@@ -260,8 +316,16 @@ fn json_mode_validation_error() {
 fn json_mode_invalid_seat_error() {
     let output = cmd()
         .args([
-            "search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01",
-            "--seat", "luxury", "--json",
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--seat",
+            "luxury",
+            "--json",
         ])
         .assert()
         .failure();
@@ -274,8 +338,18 @@ fn json_mode_invalid_seat_error() {
 fn json_mode_proxy_error() {
     let output = cmd()
         .args([
-            "search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01",
-            "--proxy", "not-a-url", "--timeout", "3", "--json",
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--proxy",
+            "not-a-url",
+            "--timeout",
+            "3",
+            "--json",
         ])
         .assert()
         .failure();
@@ -297,8 +371,17 @@ fn human_error_has_actionable_hint() {
 fn human_error_proxy_has_hint() {
     cmd()
         .args([
-            "search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01",
-            "--proxy", "not-a-url", "--timeout", "3",
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--proxy",
+            "not-a-url",
+            "--timeout",
+            "3",
         ])
         .assert()
         .failure()
@@ -326,8 +409,17 @@ fn exit_code_2_for_validation() {
 fn exit_code_3_for_proxy_error() {
     cmd()
         .args([
-            "search", "-f", "HEL", "-t", "BCN", "-d", "2026-03-01",
-            "--proxy", "not-a-url", "--timeout", "3",
+            "search",
+            "-f",
+            "HEL",
+            "-t",
+            "BCN",
+            "-d",
+            "2026-03-01",
+            "--proxy",
+            "not-a-url",
+            "--timeout",
+            "3",
         ])
         .assert()
         .code(3);
@@ -343,21 +435,18 @@ fn no_subcommand_shows_help() {
 
 #[test]
 fn unknown_subcommand_fails() {
-    cmd()
-        .arg("fly")
-        .assert()
-        .failure();
+    cmd().arg("fly").assert().failure();
 }
 
 #[test]
 fn leg_with_multi_dest_fails() {
     cmd()
-        .args([
-            "search", "--leg", "2026-03-01 HEL BCN", "-t", "BCN,ATH",
-        ])
+        .args(["search", "--leg", "2026-03-01 HEL BCN", "-t", "BCN,ATH"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--leg cannot be used with comma-separated"));
+        .stderr(predicate::str::contains(
+            "--leg cannot be used with comma-separated",
+        ));
 }
 
 #[test]
