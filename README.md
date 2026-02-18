@@ -85,16 +85,15 @@ An agent can:
 
 ### MCP (Model Context Protocol)
 
-flyr includes a built-in MCP server. Run `flyr mcp` to start it over stdio.
+flyr includes a built-in MCP server for AI clients that can only call tools (not shell commands). Clients with shell access (Claude Code, Cursor) should use the CLI directly — it's more capable.
 
-Configuration for opencode (`opencode.jsonc`):
-```json
-{ "mcp": { "flyr": { "type": "local", "command": ["flyr", "mcp"] } } }
+```bash
+flyr mcp
 ```
 
-Configuration for Claude Code (`claude_desktop_config.json`):
+opencode config (`opencode.jsonc`):
 ```json
-{ "mcpServers": { "flyr": { "command": "flyr", "args": ["mcp"] } } }
+{ "mcp": { "flyr": { "type": "local", "command": ["flyr", "mcp"] } } }
 ```
 
 ### Multi-destination search
