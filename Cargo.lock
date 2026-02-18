@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "flyr-cli"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "assert_cmd",
  "base64",

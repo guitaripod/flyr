@@ -1,6 +1,6 @@
 [package]
 name = "flyr-cli"
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 description = "Search Google Flights from the terminal"
 license = "GPL-3.0"
