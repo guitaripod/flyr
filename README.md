@@ -85,11 +85,9 @@ An agent can:
 
 ### MCP (Model Context Protocol)
 
-flyr includes a built-in MCP server for AI clients that can only call tools (not shell commands). Clients with shell access (Claude Code, Cursor) should use the CLI directly — it's more capable.
+flyr includes a built-in MCP server (`flyr mcp`) that works with local LLMs via [opencode](https://opencode.ai) + [Ollama](https://ollama.com). Search flights, compare destinations, and open results in your browser — entirely offline, no API keys, no cloud LLMs. Any model with tool support works (Ministral, Llama, Qwen, etc.).
 
-```bash
-flyr mcp
-```
+This is one way to use flyr with AI. Agents with shell access (Claude Code, Cursor, aider) don't need MCP — they can run `flyr search` directly, which exposes more options.
 
 opencode config (`opencode.jsonc`):
 ```json
