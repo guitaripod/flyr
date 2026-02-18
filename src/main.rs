@@ -52,6 +52,8 @@ Agent-optimized:
   flyr search -f HEL -t BCN,ATH,AYT -d 2026-03-01 --compact --top 3 --currency EUR"
     )]
     Search(SearchArgs),
+    #[command(about = "Start MCP server for AI agents (stdio transport)")]
+    Mcp,
 }
 
 #[derive(clap::Args)]
@@ -488,6 +490,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Mcp => flyr::mcp::run().await,
         Commands::Search(args) => {
             let json_mode = is_json(&args);
 

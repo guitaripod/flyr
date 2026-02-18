@@ -85,7 +85,17 @@ An agent can:
 
 ### MCP (Model Context Protocol)
 
-For MCP-compatible AI clients like opencode, Claude Code, or Cursor, see [`mcp-server/`](mcp-server/) for the MCP server implementation.
+flyr includes a built-in MCP server. Run `flyr mcp` to start it over stdio.
+
+Configuration for opencode (`opencode.jsonc`):
+```json
+{ "mcp": { "flyr": { "type": "local", "command": ["flyr", "mcp"] } } }
+```
+
+Configuration for Claude Code (`claude_desktop_config.json`):
+```json
+{ "mcpServers": { "flyr": { "command": "flyr", "args": ["mcp"] } } }
+```
 
 ### Multi-destination search
 
@@ -331,6 +341,7 @@ for flight in &result.flights {
 src/
 ├── main.rs     CLI entry point (clap)
 ├── lib.rs      Public API: search(query, options) -> Result<SearchResult>
+├── mcp.rs      Built-in MCP server (rmcp, stdio transport)
 ├── proto.rs    Hand-rolled protobuf encoder (~130 LOC)
 ├── query.rs    Query building, validation, URL param generation
 ├── fetch.rs    HTTP client with Chrome TLS impersonation + GDPR cookies
@@ -339,7 +350,7 @@ src/
 ├── table.rs    Human-readable table rendering with currency symbols
 └── error.rs    Error types with actionable messages
 tests/
-├── cli_test.rs     32 tests -- arg parsing, help output, error messages, exit codes
+├── cli_test.rs     CLI tests -- arg parsing, help output, error messages, exit codes
 ├── parse_test.rs   13 tests -- script extraction, JSON parsing, edge cases
 ├── proto_test.rs    6 tests -- byte-level protobuf correctness
 └── query_test.rs   23 tests -- validation rules, date handling, leap years, browser URLs

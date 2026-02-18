@@ -466,3 +466,22 @@ fn search_long_about_mentions_agents() {
         .success()
         .stdout(predicate::str::contains("For AI agents"));
 }
+
+#[test]
+fn mcp_subcommand_in_help() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mcp"));
+}
+
+#[test]
+fn mcp_help_shows_description() {
+    cmd()
+        .args(["mcp", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("MCP"))
+        .stdout(predicate::str::contains("stdio"));
+}

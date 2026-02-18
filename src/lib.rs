@@ -1,5 +1,6 @@
 pub mod error;
 pub mod fetch;
+pub mod mcp;
 pub mod model;
 pub mod parse;
 pub mod proto;

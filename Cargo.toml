@@ -27,6 +27,8 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 open = "5"
+rmcp = { version = "0.15", features = ["server", "transport-io"] }
+schemars = "1"
 
 [dev-dependencies]
 assert_cmd = "2"
