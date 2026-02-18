@@ -1,0 +1,26 @@
+{
+  "name": "flyr-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for flyr CLI - search Google Flights from AI agents",
+  "type": "module",
+  "main": "flyr-mcp",
+  "bin": {
+    "flyr-mcp": "./flyr-mcp"
+  },
+  "keywords": [
+    "mcp",
+    "flyr",
+    "flights",
+    "google-flights",
+    "ai",
+    "agent"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guitaripod/flyr"
+  },
+  "license": "GPL-3.0"
+}

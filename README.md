@@ -76,12 +76,16 @@ flyr is designed for LLM agents. Three flags minimize token consumption:
 flyr search -f HEL -t BCN,ATH,AYT -d 2026-03-01 --compact --top 3 --currency EUR
 ```
 
-flyr is designed for LLM agents. Three flags minimize token consumption:
+An agent can:
 
 - Search dozens of routes in one call
 - Filter by price, stops, departure time
 - Compare destinations and compile results
 - Open the best options directly in a browser
+
+### MCP (Model Context Protocol)
+
+For MCP-compatible AI clients like opencode, Claude Code, or Cursor, see [`mcp-server/`](mcp-server/) for the MCP server implementation.
 
 ### Multi-destination search
 
