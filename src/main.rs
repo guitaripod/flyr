@@ -166,6 +166,9 @@ struct SearchArgs {
     #[arg(long, help = "Open results in Google Flights")]
     open: bool,
 
+    #[arg(long, help = "Output Google Flights URL only (for AI agents)")]
+    url: bool,
+
     #[arg(long, value_name = "URL", help = "HTTP or SOCKS5 proxy")]
     proxy: Option<String>,
 
@@ -575,8 +578,12 @@ async fn main() {
                         };
 
                         let url = flyr::generate_browser_url(&query_params);
-                        println!("Opening: {url}");
-                        let _ = open::that(&url);
+                        if args.url {
+                            println!("{url}");
+                        } else {
+                            println!("Opening: {url}");
+                            let _ = open::that(&url);
+                        }
                     }
                     return;
                 }
@@ -616,6 +623,12 @@ async fn main() {
 
                 if args.open {
                     open_browser(&query_params, json_mode);
+                }
+
+                if args.url {
+                    let url = flyr::generate_browser_url(&query_params);
+                    println!("{url}");
+                    std::process::exit(0);
                 }
 
                 if let Err(e) = query_params.validate() {
@@ -690,6 +703,12 @@ async fn main() {
 
                 if args.open {
                     open_browser(&query_params, json_mode);
+                }
+
+                if args.url {
+                    let url = flyr::generate_browser_url(&query_params);
+                    println!("{url}");
+                    std::process::exit(0);
                 }
 
                 if let Err(e) = query_params.validate() {
