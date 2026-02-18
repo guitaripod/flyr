@@ -17,21 +17,17 @@ struct SearchArgs {
     #[schemars(
         description = "Departure airport IATA code, exactly 3 uppercase letters. Example: HEL, JFK, LAX"
     )]
-    from: Option<String>,
+    from: String,
     #[schemars(
         description = "Arrival airport IATA code(s). Comma-separate for multi-destination. Examples: BCN or BCN,ATH,AYT"
     )]
-    to: Option<String>,
+    to: String,
     #[schemars(description = "Departure date in YYYY-MM-DD format. Example: 2026-03-01")]
-    date: Option<String>,
+    date: String,
     #[schemars(
         description = "Return date in YYYY-MM-DD for round-trip. Auto-sets trip type to round-trip"
     )]
     return_date: Option<String>,
-    #[schemars(
-        description = "Multi-city legs, each: \"YYYY-MM-DD FROM TO\". Example: [\"2026-03-01 LAX NRT\", \"2026-03-10 NRT SEA\"]. Overrides from/to/date"
-    )]
-    legs: Option<Vec<String>>,
     #[schemars(
         description = "One of: economy, premium-economy, business, first. Default: economy"
     )]
@@ -48,8 +44,6 @@ struct SearchArgs {
     infants_in_seat: Option<u32>,
     #[schemars(description = "Infants on adult's lap (under 2). Default: 0")]
     infants_on_lap: Option<u32>,
-    #[schemars(description = "Language code. Default: en")]
-    lang: Option<String>,
     #[schemars(description = "Currency code. Examples: USD, EUR, JPY. Default: USD")]
     currency: Option<String>,
     #[schemars(description = "Return only N cheapest results")]
@@ -73,17 +67,11 @@ struct GetUrlArgs {
     )]
     return_date: Option<String>,
     #[schemars(
-        description = "Multi-city legs, each: \"YYYY-MM-DD FROM TO\". Example: [\"2026-03-01 LAX NRT\", \"2026-03-10 NRT SEA\"]. Overrides from/to/date"
-    )]
-    legs: Option<Vec<String>>,
-    #[schemars(
         description = "One of: economy, premium-economy, business, first. Default: economy"
     )]
     seat: Option<String>,
     #[schemars(description = "Adult passengers (12+). Default: 1")]
     adults: Option<u32>,
-    #[schemars(description = "Language code. Default: en")]
-    lang: Option<String>,
     #[schemars(description = "Currency code. Examples: USD, EUR, JPY. Default: USD")]
     currency: Option<String>,
 }
@@ -95,47 +83,15 @@ struct OpenUrlArgs {
 }
 
 fn parse_legs(
-    from: Option<&str>,
-    to: Option<&str>,
-    date: Option<&str>,
+    from: &str,
+    to: &str,
+    date: &str,
     return_date: Option<&str>,
-    legs_raw: Option<&[String]>,
     max_stops: Option<u32>,
     airlines: Option<&str>,
-) -> Result<(Vec<FlightLeg>, TripType), String> {
+) -> (Vec<FlightLeg>, TripType) {
     let parsed_airlines: Option<Vec<String>> = airlines
         .map(|s| s.split(',').map(|a| a.trim().to_uppercase()).collect());
-
-    if let Some(raw) = legs_raw {
-        if !raw.is_empty() {
-            let mut legs = Vec::new();
-            for leg_str in raw {
-                let parts: Vec<&str> = leg_str.split_whitespace().collect();
-                if parts.len() != 3 {
-                    return Err(format!(
-                        "each leg must be \"YYYY-MM-DD FROM TO\", got: \"{leg_str}\""
-                    ));
-                }
-                legs.push(FlightLeg {
-                    date: parts[0].to_string(),
-                    from_airport: parts[1].to_uppercase(),
-                    to_airport: parts[2].to_uppercase(),
-                    max_stops,
-                    airlines: parsed_airlines.clone(),
-                });
-            }
-            let trip = if legs.len() >= 2 {
-                TripType::MultiCity
-            } else {
-                TripType::OneWay
-            };
-            return Ok((legs, trip));
-        }
-    }
-
-    let from = from.ok_or("'from' is required when 'legs' is not provided")?;
-    let to = to.ok_or("'to' is required when 'legs' is not provided")?;
-    let date = date.ok_or("'date' is required when 'legs' is not provided")?;
 
     let mut legs = vec![FlightLeg {
         date: date.to_string(),
@@ -158,7 +114,7 @@ fn parse_legs(
         TripType::OneWay
     };
 
-    Ok((legs, trip))
+    (legs, trip)
 }
 
 fn tool_error(msg: impl Into<String>) -> Result<CallToolResult, McpError> {
@@ -186,30 +142,17 @@ impl FlyrMcp {
     }
 
     #[tool(
-        description = "Search for flights and return results as JSON. Searches Google Flights for available flights between airports on specific dates. Returns flight options with prices, airlines, duration, stops, and schedule. Use 'from', 'to', and 'date' for simple searches, or 'legs' for multi-city itineraries. Comma-separate 'to' for multi-destination comparison. To open results in browser: call flyr_get_url with the same parameters, then call open_url with the returned URL."
+        description = "Search for flights and return results as JSON. Searches Google Flights for available flights between airports on specific dates. Returns flight options with prices, airlines, duration, stops, and schedule. Comma-separate 'to' for multi-destination comparison. To open results in browser: call flyr_get_url with the same parameters, then call open_url with the returned URL."
     )]
     async fn flyr_search(
         &self,
         Parameters(args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let to_str = args.to.as_deref();
-        let is_multi = to_str.is_some_and(|t| t.contains(','));
+        let is_multi = args.to.contains(',');
 
         if is_multi {
-            if args.legs.as_ref().is_some_and(|l| !l.is_empty()) {
-                return tool_error(
-                    "'legs' cannot be used with comma-separated 'to' destinations",
-                );
-            }
-
-            let from = match args.from.as_deref() {
-                Some(f) => f.to_uppercase(),
-                None => return tool_error("'from' is required for multi-destination search"),
-            };
-            let date = match args.date.as_deref() {
-                Some(d) => d.to_string(),
-                None => return tool_error("'date' is required for multi-destination search"),
-            };
+            let from = args.from.to_uppercase();
+            let date = args.date;
 
             let seat = match args
                 .seat
@@ -233,11 +176,10 @@ impl FlyrMcp {
                 .as_ref()
                 .map(|s| s.split(',').map(|a| a.trim().to_uppercase()).collect());
 
-            let lang = args.lang.unwrap_or_else(|| "en".into());
             let currency = args.currency.unwrap_or_else(|| "USD".into());
 
-            let destinations: Vec<String> = to_str
-                .unwrap()
+            let destinations: Vec<String> = args
+                .to
                 .split(',')
                 .map(|s| s.trim().to_uppercase())
                 .filter(|s| !s.is_empty())
@@ -272,7 +214,7 @@ impl FlyrMcp {
                     passengers: passengers.clone(),
                     seat: seat.clone(),
                     trip,
-                    language: lang.clone(),
+                    language: "en".into(),
                     currency: currency.clone(),
                 };
 
@@ -310,18 +252,14 @@ impl FlyrMcp {
             let json = serde_json::to_string_pretty(&results).unwrap();
             Ok(CallToolResult::success(vec![Content::text(json)]))
         } else {
-            let (legs, trip) = match parse_legs(
-                args.from.as_deref(),
-                args.to.as_deref(),
-                args.date.as_deref(),
+            let (legs, trip) = parse_legs(
+                &args.from,
+                &args.to,
+                &args.date,
                 args.return_date.as_deref(),
-                args.legs.as_deref(),
                 args.max_stops,
                 args.airlines.as_deref(),
-            ) {
-                Ok(v) => v,
-                Err(e) => return tool_error(e),
-            };
+            );
 
             let seat = match args
                 .seat
@@ -340,7 +278,6 @@ impl FlyrMcp {
                 infants_on_lap: args.infants_on_lap.unwrap_or(0),
             };
 
-            let lang = args.lang.unwrap_or_else(|| "en".into());
             let currency = args.currency.unwrap_or_else(|| "USD".into());
 
             let params = QueryParams {
@@ -348,7 +285,7 @@ impl FlyrMcp {
                 passengers,
                 seat,
                 trip,
-                language: lang,
+                language: "en".into(),
                 currency,
             };
 
@@ -379,12 +316,6 @@ impl FlyrMcp {
         let is_multi = args.to.contains(',');
 
         if is_multi {
-            if args.legs.as_ref().is_some_and(|l| !l.is_empty()) {
-                return tool_error(
-                    "'legs' cannot be used with comma-separated 'to' destinations",
-                );
-            }
-
             let seat = match args
                 .seat
                 .as_deref()
@@ -400,7 +331,6 @@ impl FlyrMcp {
                 ..Default::default()
             };
 
-            let lang = args.lang.unwrap_or_else(|| "en".into());
             let currency = args.currency.unwrap_or_else(|| "USD".into());
 
             let destinations: Vec<String> = args
@@ -438,7 +368,7 @@ impl FlyrMcp {
                     passengers: passengers.clone(),
                     seat: seat.clone(),
                     trip,
-                    language: lang.clone(),
+                    language: "en".into(),
                     currency: currency.clone(),
                 };
 
@@ -453,18 +383,14 @@ impl FlyrMcp {
                 urls.join("\n"),
             )]))
         } else {
-            let (legs, trip) = match parse_legs(
-                Some(&args.from),
-                Some(&args.to),
-                Some(&args.date),
+            let (legs, trip) = parse_legs(
+                &args.from,
+                &args.to,
+                &args.date,
                 args.return_date.as_deref(),
-                args.legs.as_deref(),
                 None,
                 None,
-            ) {
-                Ok(v) => v,
-                Err(e) => return tool_error(e),
-            };
+            );
 
             let seat = match args
                 .seat
@@ -481,7 +407,6 @@ impl FlyrMcp {
                 ..Default::default()
             };
 
-            let lang = args.lang.unwrap_or_else(|| "en".into());
             let currency = args.currency.unwrap_or_else(|| "USD".into());
 
             let params = QueryParams {
@@ -489,7 +414,7 @@ impl FlyrMcp {
                 passengers,
                 seat,
                 trip,
-                language: lang,
+                language: "en".into(),
                 currency,
             };
 
@@ -553,16 +478,7 @@ mod tests {
 
     #[test]
     fn parse_legs_from_to_date() {
-        let (legs, trip) = parse_legs(
-            Some("HEL"),
-            Some("BCN"),
-            Some("2026-03-01"),
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+        let (legs, trip) = parse_legs("HEL", "BCN", "2026-03-01", None, None, None);
         assert_eq!(legs.len(), 1);
         assert_eq!(legs[0].from_airport, "HEL");
         assert_eq!(legs[0].to_airport, "BCN");
@@ -572,16 +488,8 @@ mod tests {
 
     #[test]
     fn parse_legs_with_return_date() {
-        let (legs, trip) = parse_legs(
-            Some("HEL"),
-            Some("BCN"),
-            Some("2026-03-01"),
-            Some("2026-03-08"),
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+        let (legs, trip) =
+            parse_legs("HEL", "BCN", "2026-03-01", Some("2026-03-08"), None, None);
         assert_eq!(legs.len(), 2);
         assert_eq!(legs[0].from_airport, "HEL");
         assert_eq!(legs[0].to_airport, "BCN");
@@ -592,47 +500,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_legs_from_raw() {
-        let raw = vec![
-            "2026-03-01 LAX NRT".to_string(),
-            "2026-03-10 NRT SEA".to_string(),
-        ];
-        let (legs, trip) = parse_legs(None, None, None, None, Some(&raw), None, None).unwrap();
-        assert_eq!(legs.len(), 2);
-        assert_eq!(legs[0].from_airport, "LAX");
-        assert_eq!(legs[0].to_airport, "NRT");
-        assert_eq!(legs[1].from_airport, "NRT");
-        assert_eq!(legs[1].to_airport, "SEA");
-        assert!(matches!(trip, TripType::MultiCity));
-    }
-
-    #[test]
-    fn parse_legs_missing_from() {
-        let result = parse_legs(None, Some("BCN"), Some("2026-03-01"), None, None, None, None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("'from' is required"));
-    }
-
-    #[test]
-    fn parse_legs_malformed_leg_string() {
-        let raw = vec!["2026-03-01 LAX".to_string()];
-        let result = parse_legs(None, None, None, None, Some(&raw), None, None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("YYYY-MM-DD FROM TO"));
-    }
-
-    #[test]
     fn parse_legs_with_airlines() {
-        let (legs, _) = parse_legs(
-            Some("HEL"),
-            Some("BCN"),
-            Some("2026-03-01"),
-            None,
-            None,
-            Some(1),
-            Some("AY,IB"),
-        )
-        .unwrap();
+        let (legs, _) = parse_legs("HEL", "BCN", "2026-03-01", None, Some(1), Some("AY,IB"));
         assert_eq!(legs[0].max_stops, Some(1));
         assert_eq!(
             legs[0].airlines,
