@@ -1,46 +1,56 @@
 # flyr-mcp
 
-MCP server for flyr CLI - search Google Flights from AI agents.
+MCP server for flyr CLI - search Google Flights from **local AI agents**.
+
+Use with local LLMs (Ollama, LM Studio, etc.) via MCP-compatible clients to have AI agents search and book flights completely offline.
+
+## Why Local LLMs?
+
+- **Privacy** - flight searches never leave your machine
+- **Cost** - no API fees, just local compute
+- **Speed** - running locally means lower latency
+- **Offline** - works without internet for the LLM itself
 
 ## Prerequisites
 
 - [flyr](https://github.com/guitaripod/flyr) installed (`cargo install flyr-cli`)
 - Node.js 18+
+- A local LLM via MCP-compatible client (opencode, Claude Code, etc.)
 
-## Quick Start (opencode)
+## Quick Start (opencode + Ollama)
 
-Add to your opencode config (`~/.config/opencode/opencode.json`):
+1. Install flyr: `cargo install flyr-cli`
 
-```json
-{
-  "mcp": {
-    "flyr": {
-      "type": "local",
-      "command": ["node", "/path/to/flyr/mcp-server/flyr-mcp"],
-      "enabled": true
-    }
-  }
-}
-```
+2. Pull a model with tool support:
 
-Or set `FLYR_PATH` if flyr isn't in your PATH:
+   ```bash
+   ollama pull llama3.1
+   ```
 
-```json
-{
-  "mcp": {
-    "flyr": {
-      "type": "local",
-      "command": [
-        "env",
-        "FLYR_PATH=/full/path/to/flyr",
-        "node",
-        "/path/to/flyr/mcp-server/flyr-mcp"
-      ],
-      "enabled": true
-    }
-  }
-}
-```
+3. Add to your opencode config (`~/.config/opencode/opencode.json`):
+
+   ```json
+   {
+     "mcp": {
+       "flyr": {
+         "type": "local",
+         "command": ["node", "/path/to/flyr/mcp-server/flyr-mcp"],
+         "enabled": true
+       }
+     },
+     "provider": {
+       "ollama": {
+         "options": { "baseURL": "http://localhost:11434/v1" },
+         "models": {
+           "llama3.1": { "tools": true }
+         }
+       }
+     }
+   }
+   ```
+
+4. Ask opencode:
+   > "find cheap flights from Helsinki to Barcelona tomorrow, open the results in my browser"
 
 ## Tools
 
@@ -88,6 +98,8 @@ Open a URL in your default browser.
 > "Find cheap flights from Helsinki to Barcelona tomorrow"
 
 > "Search for warm destinations from HEL next weekend, top 3 results, and open in browser"
+
+> "Find round-trip business class from JFK to NRT departing March 1st"
 
 ## Running Directly
 
