@@ -1,15 +1,15 @@
 # flyr-mcp
 
-MCP server for flyr CLI - search Google Flights from **local AI agents**.
+MCP server for flyr CLI - search Google Flights from your local AI agent.
 
-Use with local LLMs (Ollama, LM Studio, etc.) via MCP-compatible clients to have AI agents search and book flights completely offline.
+Use with local LLMs (Ollama, LM Studio, etc.) via MCP-compatible clients to have AI agents search and book flights.
 
 ## Why Local LLMs?
 
-- **Privacy** - flight searches never leave your machine
-- **Cost** - no API fees, just local compute
-- **Speed** - running locally means lower latency
-- **Offline** - works without internet for the LLM itself
+- **Privacy** - your prompts and conversations stay local
+- **Cost** - no API fees to OpenAI/Anthropic, just local compute
+- **Speed** - lower latency than cloud APIs
+- **Control** - run whatever model you want, customize behavior
 
 ## Prerequisites
 
