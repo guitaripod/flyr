@@ -285,7 +285,7 @@ In human mode, errors go to stderr.
 
 1. **Query encoding** -- Flight parameters are protobuf-encoded (hand-rolled encoder, ~130 LOC) and base64-encoded into the `tfs` URL parameter, matching what Google Flights expects.
 
-2. **HTTP request** -- Uses [wreq](https://github.com/nickel-org/wreq) (reqwest fork) with Chrome 137 TLS fingerprint emulation to avoid bot detection. Pre-loads GDPR consent cookies to bypass the EU consent wall.
+2. **HTTP request** -- Uses [wreq](https://github.com/nickel-org/wreq) (reqwest fork) with Chrome 137 TLS fingerprint emulation to avoid bot detection. Automatically handles Google's EU consent wall by detecting consent redirects and submitting the acceptance form.
 
 3. **HTML parsing** -- Extracts the `<script class="ds:1">` tag, isolates the `data:` JSON payload, parses with serde_json.
 
@@ -341,7 +341,7 @@ src/
 ├── mcp.rs      Built-in MCP server (rmcp, stdio transport)
 ├── proto.rs    Hand-rolled protobuf encoder (~130 LOC)
 ├── query.rs    Query building, validation, URL param generation
-├── fetch.rs    HTTP client with Chrome TLS impersonation + GDPR cookies
+├── fetch.rs    HTTP client with Chrome TLS impersonation + consent handling
 ├── parse.rs    HTML script extraction + JSON payload navigation
 ├── model.rs    All data types (Serialize + Debug + Clone)
 ├── table.rs    Human-readable table rendering with currency symbols
