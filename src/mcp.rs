@@ -15,11 +15,11 @@ use crate::query::{FlightLeg, Passengers, QueryParams, Seat, SearchQuery, TripTy
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SearchArgs {
     #[schemars(
-        description = "Departure airport IATA code, exactly 3 uppercase letters. Example: HEL, JFK, LAX"
+        description = "Departure airport or city IATA code, exactly 3 uppercase letters. Examples: HEL, JFK, or LON for all London airports"
     )]
     from: String,
     #[schemars(
-        description = "Arrival airport IATA code(s). Comma-separate for multi-destination. Examples: BCN or BCN,ATH,AYT"
+        description = "Arrival airport or city IATA code(s). Comma-separate for multi-destination. Examples: BCN, NYC or BCN,ATH,AYT"
     )]
     to: String,
     #[schemars(description = "Departure date in YYYY-MM-DD format. Example: 2026-03-01")]
@@ -53,11 +53,11 @@ struct SearchArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct GetUrlArgs {
     #[schemars(
-        description = "Departure airport IATA code, exactly 3 uppercase letters. Example: HEL, JFK, LAX"
+        description = "Departure airport or city IATA code, exactly 3 uppercase letters. Examples: HEL, JFK, or LON for all London airports"
     )]
     from: String,
     #[schemars(
-        description = "Arrival airport IATA code(s). Comma-separate for multi-destination. Examples: BCN or BCN,ATH,AYT"
+        description = "Arrival airport or city IATA code(s). Comma-separate for multi-destination. Examples: BCN, NYC or BCN,ATH,AYT"
     )]
     to: String,
     #[schemars(description = "Departure date in YYYY-MM-DD format. Example: 2026-03-01")]

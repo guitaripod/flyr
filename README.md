@@ -108,6 +108,16 @@ Works with `--return-date` (each destination gets its own return leg), `--top`, 
 
 Cannot be combined with `--leg` (use separate invocations for multi-city itineraries).
 
+### City codes
+
+IATA city codes search every airport in a metro area, anywhere an airport code is accepted:
+
+```bash
+flyr search -f LON -t NYC -d 2026-03-01 --compact --top 3
+```
+
+Common ones: `LON`, `NYC`, `PAR`, `TYO`, `MIL`, `ROM`, `STO`, `CHI`, `WAS`, `SEL`, `BJS`, `OSA`.
+
 ### Concurrent searches (advanced)
 
 For more complex scenarios beyond multi-destination, you can still run parallel shell processes:
@@ -116,6 +126,14 @@ For more complex scenarios beyond multi-destination, you can still run parallel 
 for dest in BKK SIN KUL HKT DPS; do
   flyr search -f HEL -t $dest -d 2026-03-01 --return-date 2026-03-08 --json --currency EUR &
 done | jq -s '[.[] | .flights[0] | {dest: .segments[0].to_airport.code, price, airlines}] | sort_by(.price)'
+```
+
+Flexible dates work the same way, one search per day:
+
+```bash
+for d in 2026-03-{01..31}; do
+  echo "$d $(flyr search -f LON -t NYC -d $d --compact --top 1)"
+done | sort -t'$' -k2 -n
 ```
 
 ### Localization
@@ -135,8 +153,8 @@ flyr search -f HEL -t BKK -d 2026-03-01 --currency THB --lang th
 flyr search [OPTIONS]
 
 REQUIRED (simple mode):
-  -f, --from <IATA>           Departure airport (3-letter IATA code)
-  -t, --to <IATA>             Arrival airport (comma-separate for multi-destination)
+  -f, --from <IATA>           Departure airport or city (3-letter IATA code)
+  -t, --to <IATA>             Arrival airport or city (comma-separate for multi-destination)
   -d, --date <YYYY-MM-DD>     Departure date
 
 MULTI-CITY (replaces -f/-t/-d):

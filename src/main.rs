@@ -63,6 +63,7 @@ struct SearchArgs {
         value_name = "IATA",
         help = "Departure airport code",
         long_help = "Departure airport IATA code (3 letters, e.g. JFK, HEL, LAX). \
+            City codes cover every airport in a metro area (e.g. LON, NYC, PAR, TYO). \
             Required unless using --leg."
     )]
     from: Option<String>,
@@ -72,6 +73,7 @@ struct SearchArgs {
         value_name = "IATA",
         help = "Arrival airport code (comma-separate for multi-destination)",
         long_help = "Arrival airport IATA code (3 letters, e.g. LHR, BCN, NRT). \
+            City codes cover every airport in a metro area (e.g. LON, NYC, PAR, TYO). \
             Comma-separate for multi-destination search (e.g. BCN,ATH,AYT). \
             Required unless using --leg."
     )]
