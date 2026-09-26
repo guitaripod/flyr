@@ -1,6 +1,8 @@
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
+use serde_json::{json, Value};
 
+use crate::date::Date;
 use crate::error::FlightError;
 use crate::proto;
 
@@ -32,6 +34,32 @@ impl Default for Passengers {
     }
 }
 
+impl Passengers {
+    pub fn validate(&self) -> Result<(), FlightError> {
+        let total = self.adults + self.children + self.infants_in_seat + self.infants_on_lap;
+
+        if total > 9 {
+            return Err(FlightError::Validation(format!(
+                "total passengers ({total}) exceeds maximum of 9"
+            )));
+        }
+
+        if total == 0 {
+            return Err(FlightError::Validation(
+                "at least one passenger required".into(),
+            ));
+        }
+
+        if self.infants_on_lap > self.adults {
+            return Err(FlightError::Validation(
+                "infants on lap cannot exceed number of adults".into(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Seat {
     Economy,
@@ -50,9 +78,18 @@ impl Seat {
             _ => Err(FlightError::Validation(format!("invalid seat class: {s}"))),
         }
     }
+
+    pub fn code(&self) -> u64 {
+        match self {
+            Self::Economy => 1,
+            Self::PremiumEconomy => 2,
+            Self::Business => 3,
+            Self::First => 4,
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TripType {
     RoundTrip,
     OneWay,
@@ -68,6 +105,38 @@ impl TripType {
             _ => Err(FlightError::Validation(format!("invalid trip type: {s}"))),
         }
     }
+
+    pub fn code(&self) -> u64 {
+        match self {
+            Self::RoundTrip => 1,
+            Self::OneWay => 2,
+            Self::MultiCity => 3,
+        }
+    }
+}
+
+/// Everything about a search except the route: filters, passengers, cabin and locale.
+#[derive(Debug, Clone)]
+pub struct Filters {
+    pub max_stops: Option<u32>,
+    pub airlines: Option<Vec<String>>,
+    pub passengers: Passengers,
+    pub seat: Seat,
+    pub language: String,
+    pub currency: String,
+}
+
+impl Default for Filters {
+    fn default() -> Self {
+        Self {
+            max_stops: None,
+            airlines: None,
+            passengers: Passengers::default(),
+            seat: Seat::Economy,
+            language: "en".into(),
+            currency: "USD".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +149,17 @@ pub struct QueryParams {
     pub currency: String,
 }
 
+/// Splits a comma-separated list of codes, uppercased, without blanks or repeats.
+pub fn parse_codes(list: &str) -> Vec<String> {
+    let mut codes: Vec<String> = Vec::new();
+    for code in list.split(',').map(|c| c.trim().to_uppercase()) {
+        if !code.is_empty() && !codes.contains(&code) {
+            codes.push(code);
+        }
+    }
+    codes
+}
+
 fn validate_airport(code: &str) -> Result<(), FlightError> {
     if code.len() != 3 || !code.chars().all(|c| c.is_ascii_uppercase()) {
         return Err(FlightError::InvalidAirport(code.to_string()));
@@ -87,48 +167,48 @@ fn validate_airport(code: &str) -> Result<(), FlightError> {
     Ok(())
 }
 
-fn days_in_month(year: u32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400) {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 0,
-    }
-}
-
-fn validate_date(date: &str) -> Result<(), FlightError> {
-    let parts: Vec<&str> = date.split('-').collect();
-    if parts.len() != 3 {
-        return Err(FlightError::InvalidDate(date.to_string()));
-    }
-    let year: u32 = parts[0]
-        .parse()
-        .map_err(|_| FlightError::InvalidDate(date.to_string()))?;
-    let month: u32 = parts[1]
-        .parse()
-        .map_err(|_| FlightError::InvalidDate(date.to_string()))?;
-    let day: u32 = parts[2]
-        .parse()
-        .map_err(|_| FlightError::InvalidDate(date.to_string()))?;
-
-    if year < 2000 || !(1..=12).contains(&month) {
-        return Err(FlightError::InvalidDate(date.to_string()));
-    }
-
-    if day < 1 || day > days_in_month(year, month) {
-        return Err(FlightError::InvalidDate(date.to_string()));
-    }
-
-    Ok(())
+fn validate_date(date: &str) -> Result<Date, FlightError> {
+    Date::parse(date).ok_or_else(|| FlightError::InvalidDate(date.to_string()))
 }
 
 impl QueryParams {
+    /// Builds a query from `(date, from, to)` legs, applying the same filters to every leg.
+    pub fn new(legs: &[(&str, &str, &str)], trip: TripType, filters: &Filters) -> Self {
+        Self {
+            legs: legs
+                .iter()
+                .map(|&(date, from, to)| FlightLeg {
+                    date: date.to_string(),
+                    from_airport: from.to_string(),
+                    to_airport: to.to_string(),
+                    max_stops: filters.max_stops,
+                    airlines: filters.airlines.clone(),
+                })
+                .collect(),
+            passengers: filters.passengers.clone(),
+            seat: filters.seat.clone(),
+            trip,
+            language: filters.language.clone(),
+            currency: filters.currency.clone(),
+        }
+    }
+
+    /// A one-way query, or a round trip when `return_date` is given.
+    pub fn route(
+        from: &str,
+        to: &str,
+        date: &str,
+        return_date: Option<&str>,
+        filters: &Filters,
+    ) -> Self {
+        match return_date {
+            Some(ret) => {
+                Self::new(&[(date, from, to), (ret, to, from)], TripType::RoundTrip, filters)
+            }
+            None => Self::new(&[(date, from, to)], TripType::OneWay, filters),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), FlightError> {
         if self.legs.is_empty() {
             return Err(FlightError::Validation(
@@ -136,36 +216,39 @@ impl QueryParams {
             ));
         }
 
+        let mut previous: Option<Date> = None;
         for leg in &self.legs {
             validate_airport(&leg.from_airport)?;
             validate_airport(&leg.to_airport)?;
-            validate_date(&leg.date)?;
+            let date = validate_date(&leg.date)?;
+            if previous.is_some_and(|p| date < p) {
+                return Err(FlightError::Validation(format!(
+                    "leg on {date} departs before the previous leg"
+                )));
+            }
+            previous = Some(date);
         }
 
-        let total = self.passengers.adults
-            + self.passengers.children
-            + self.passengers.infants_in_seat
-            + self.passengers.infants_on_lap;
-
-        if total > 9 {
-            return Err(FlightError::Validation(format!(
-                "total passengers ({total}) exceeds maximum of 9"
-            )));
+        match (&self.trip, self.legs.len()) {
+            (TripType::OneWay, 1) | (TripType::RoundTrip, 2) | (TripType::MultiCity, 2..) => {}
+            (TripType::RoundTrip, _) => {
+                return Err(FlightError::Validation(
+                    "round-trip needs exactly one return leg (use --return-date)".into(),
+                ))
+            }
+            (TripType::MultiCity, _) => {
+                return Err(FlightError::Validation(
+                    "multi-city needs at least two legs (use --leg)".into(),
+                ))
+            }
+            (TripType::OneWay, _) => {
+                return Err(FlightError::Validation(
+                    "one-way takes a single leg (use --trip multi-city for more)".into(),
+                ))
+            }
         }
 
-        if total == 0 {
-            return Err(FlightError::Validation(
-                "at least one passenger required".into(),
-            ));
-        }
-
-        if self.passengers.infants_on_lap > self.passengers.adults {
-            return Err(FlightError::Validation(
-                "infants on lap cannot exceed number of adults".into(),
-            ));
-        }
-
-        Ok(())
+        self.passengers.validate()
     }
 
     pub fn to_url_params(&self) -> Vec<(String, String)> {
@@ -185,18 +268,18 @@ impl QueryParams {
     }
 }
 
-pub enum SearchQuery {
-    Structured(QueryParams),
-    NaturalLanguage(String),
-}
-
-impl SearchQuery {
-    pub fn to_url_params(&self) -> Vec<(String, String)> {
-        match self {
-            Self::Structured(q) => q.to_url_params(),
-            Self::NaturalLanguage(text) => vec![("q".to_string(), text.clone())],
-        }
-    }
+/// One query per destination, all from the same origin on the same dates.
+pub fn route_queries(
+    from: &str,
+    destinations: &[String],
+    date: &str,
+    return_date: Option<&str>,
+    filters: &Filters,
+) -> Vec<(String, QueryParams)> {
+    destinations
+        .iter()
+        .map(|to| (to.clone(), QueryParams::route(from, to, date, return_date, filters)))
+        .collect()
 }
 
 pub fn to_google_flights_url(params: &QueryParams) -> String {
@@ -215,4 +298,126 @@ pub fn to_google_flights_url(params: &QueryParams) -> String {
     }
 
     url
+}
+
+/// Cheapest fare per departure date across a range, for one-way trips or for round
+/// trips of a fixed length.
+#[derive(Debug, Clone)]
+pub struct DateQuery {
+    pub from_airport: String,
+    pub to_airport: String,
+    pub start: Date,
+    pub end: Date,
+    pub stay_days: Option<u32>,
+    pub filters: Filters,
+}
+
+/// Parses `YYYY-MM` (a whole month), `YYYY-MM-DD..YYYY-MM-DD`, or a single `YYYY-MM-DD`.
+pub fn parse_date_range(spec: &str) -> Result<(Date, Date), FlightError> {
+    let invalid = || {
+        FlightError::Validation(format!(
+            "invalid date range \"{spec}\" — use YYYY-MM for a month or YYYY-MM-DD..YYYY-MM-DD \
+             (e.g. 2026-03 or 2026-03-01..2026-03-15)"
+        ))
+    };
+
+    if let Some((start, end)) = spec.split_once("..") {
+        let start = Date::parse(start).ok_or_else(invalid)?;
+        let end = Date::parse(end).ok_or_else(invalid)?;
+        if start > end {
+            return Err(FlightError::Validation(format!(
+                "date range \"{spec}\" ends before it starts"
+            )));
+        }
+        return Ok((start, end));
+    }
+
+    if let Some(date) = Date::parse(spec) {
+        return Ok((date, date));
+    }
+
+    let first = Date::parse(&format!("{spec}-01")).ok_or_else(invalid)?;
+    Ok((first, first.last_of_month()))
+}
+
+impl DateQuery {
+    /// The first date to price: past dates are skipped, since Google rejects them.
+    pub fn first_date(&self) -> Date {
+        self.start.max(Date::today())
+    }
+
+    pub fn validate(&self) -> Result<(), FlightError> {
+        validate_airport(&self.from_airport)?;
+        validate_airport(&self.to_airport)?;
+
+        if self.start > self.end {
+            return Err(FlightError::Validation(
+                "date range ends before it starts".into(),
+            ));
+        }
+        if self.end < Date::today() {
+            return Err(FlightError::Validation(format!(
+                "date range ending {} is in the past",
+                self.end
+            )));
+        }
+
+        self.filters.passengers.validate()
+    }
+
+    /// The form body for Google's `GetCalendarGraph` RPC, mirroring what the Google
+    /// Flights date grid sends: `f.req=[null, "<filters as JSON>"]`.
+    pub fn to_request_body(&self) -> String {
+        let first = self.first_date();
+        let (trip, segments) = match self.stay_days {
+            Some(stay) => (
+                TripType::RoundTrip,
+                vec![
+                    self.calendar_segment(&self.from_airport, &self.to_airport, first),
+                    self.calendar_segment(
+                        &self.to_airport,
+                        &self.from_airport,
+                        first.add_days(stay as i64),
+                    ),
+                ],
+            ),
+            None => (
+                TripType::OneWay,
+                vec![self.calendar_segment(&self.from_airport, &self.to_airport, first)],
+            ),
+        };
+
+        let p = &self.filters.passengers;
+        let settings = json!([
+            null, null, trip.code(), null, [], self.filters.seat.code(),
+            [p.adults, p.children, p.infants_on_lap, p.infants_in_seat],
+            null, null, null, null, null, null, segments,
+            null, null, null, 1
+        ]);
+
+        let mut filters = vec![
+            Value::Null,
+            settings,
+            json!([first.to_string(), self.end.to_string()]),
+        ];
+        if let Some(stay) = self.stay_days {
+            filters.extend([Value::Null, json!([stay, stay])]);
+        }
+
+        let wrapped = json!([null, Value::Array(filters).to_string()]);
+        format!("f.req={}", urlencoding::encode(&wrapped.to_string()))
+    }
+
+    /// One leg of the calendar filter. Stops are encoded with 0 meaning any number,
+    /// then 1 for nonstop, 2 for up to one stop and 3 for up to two.
+    fn calendar_segment(&self, from: &str, to: &str, date: Date) -> Value {
+        let stops = match self.filters.max_stops {
+            Some(n @ 0..=2) => n + 1,
+            _ => 0,
+        };
+        json!([
+            [[[from, 0]]], [[[to, 0]]], null, stops, self.filters.airlines, null,
+            date.to_string(), null, null, null, null, null, null, null, 3
+        ])
+    }
 }

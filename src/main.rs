@@ -1,13 +1,16 @@
-use std::collections::BTreeMap;
 use std::process;
 
 use clap::Parser;
-use tokio::task::JoinSet;
+use serde::Serialize;
+use serde_json::Value;
 
-use flyr::error::FlightError;
+use flyr::error::{FlightError, INVALID_ARGUMENT};
 use flyr::fetch::FetchOptions;
-use flyr::model::SearchResult;
-use flyr::query::{FlightLeg, Passengers, QueryParams, Seat, SearchQuery, TripType};
+use flyr::model::{keep_cheapest_dates, SearchResult};
+use flyr::query::{
+    parse_codes, parse_date_range, route_queries, DateQuery, Filters, Passengers, QueryParams,
+    Seat, TripType,
+};
 use flyr::table;
 
 #[derive(Parser)]
@@ -23,6 +26,7 @@ Examples:
   flyr search -f HEL -t BKK -d 2026-03-01 --seat business --max-stops 1
   flyr search --leg \"2026-03-01 LAX NRT\" --leg \"2026-03-10 NRT LAX\"
   flyr search -f HEL -t BCN -d 2026-03-01 --airlines AY,IB --adults 2
+  flyr dates -f HEL -t BCN -d 2026-03 --stay 7
 
 Agent-optimized:
   flyr search -f HEL -t BCN,ATH,AYT -d 2026-03-01 --compact --top 3 --currency EUR"
@@ -52,6 +56,20 @@ Agent-optimized:
   flyr search -f HEL -t BCN,ATH,AYT -d 2026-03-01 --compact --top 3 --currency EUR"
     )]
     Search(SearchArgs),
+    #[command(
+        about = "Find the cheapest dates to fly across a month or date range",
+        long_about = "Show the cheapest fare for every departure date in a month or date range, \
+            in a single request.\n\
+            One-way by default; add --stay N for round trips of N days.\n\
+            Takes airport codes only: city codes like LON aren't supported for date searches.",
+        after_help = "\
+Examples:
+  Whole month:  flyr dates -f HEL -t BCN -d 2026-03
+  Date range:   flyr dates -f LHR -t JFK -d 2026-03-01..2026-04-15
+  Round-trip:   flyr dates -f HEL -t BCN -d 2026-03 --stay 7
+  Cheapest 5:   flyr dates -f HEL -t BKK -d 2026-03 --top 5 --compact"
+    )]
+    Dates(DatesArgs),
     #[command(about = "Start MCP server for AI agents (stdio transport)")]
     Mcp,
 }
@@ -103,7 +121,8 @@ struct SearchArgs {
         value_name = "YYYY-MM-DD",
         help = "Return date (auto-sets round-trip)",
         long_help = "Return date in YYYY-MM-DD format. Automatically creates a return leg \
-            and sets trip type to round-trip."
+            and sets trip type to round-trip. Results list outbound flights, priced for \
+            the whole round trip."
     )]
     return_date: Option<String>,
 
@@ -115,6 +134,81 @@ struct SearchArgs {
     )]
     trip: String,
 
+    #[command(flatten)]
+    filters: FilterArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
+
+    #[arg(
+        long,
+        default_value = "en",
+        value_name = "CODE",
+        help_heading = "Output",
+        help = "Language code (e.g. en, de, ja)"
+    )]
+    lang: String,
+
+    #[arg(long, help_heading = "Output", help = "Open results in Google Flights")]
+    open: bool,
+
+    #[arg(long, help_heading = "Output", help = "Output Google Flights URL only (for AI agents)")]
+    url: bool,
+
+    #[command(flatten)]
+    net: NetArgs,
+}
+
+#[derive(clap::Args)]
+struct DatesArgs {
+    #[arg(
+        short, long,
+        value_name = "IATA",
+        help = "Departure airport code",
+        long_help = "Departure airport IATA code (3 letters, e.g. HEL, JFK). \
+            City codes like LON aren't supported for date searches."
+    )]
+    from: String,
+
+    #[arg(
+        short, long,
+        value_name = "IATA",
+        help = "Arrival airport code",
+        long_help = "Arrival airport IATA code (3 letters, e.g. BCN, LHR). \
+            City codes like NYC aren't supported for date searches."
+    )]
+    to: String,
+
+    #[arg(
+        short, long,
+        value_name = "RANGE",
+        help = "Month (YYYY-MM) or date range (YYYY-MM-DD..YYYY-MM-DD)",
+        long_help = "Departure dates to price: a whole month as YYYY-MM (e.g. 2026-03), \
+            a range as YYYY-MM-DD..YYYY-MM-DD (e.g. 2026-03-01..2026-04-15), or a single \
+            YYYY-MM-DD. Dates already in the past are skipped."
+    )]
+    date: String,
+
+    #[arg(
+        long,
+        value_name = "DAYS",
+        help = "Round trips of this many days (omit for one-way)"
+    )]
+    stay: Option<u32>,
+
+    #[command(flatten)]
+    filters: FilterArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
+
+    #[command(flatten)]
+    net: NetArgs,
+}
+
+#[derive(clap::Args)]
+#[command(next_help_heading = "Filters")]
+struct FilterArgs {
     #[arg(
         long,
         default_value = "economy",
@@ -148,17 +242,33 @@ struct SearchArgs {
 
     #[arg(long, default_value = "0", value_name = "N", help = "Infants on adult's lap (under 2)")]
     infants_on_lap: u32,
+}
 
-    #[arg(long, default_value = "en", value_name = "CODE", help = "Language code (e.g. en, de, ja)")]
-    lang: String,
+impl FilterArgs {
+    fn to_filters(&self, language: &str, currency: &str) -> Result<Filters, FlightError> {
+        Ok(Filters {
+            max_stops: self.max_stops,
+            airlines: self.airlines.as_deref().map(parse_codes),
+            passengers: Passengers {
+                adults: self.adults,
+                children: self.children,
+                infants_in_seat: self.infants_in_seat,
+                infants_on_lap: self.infants_on_lap,
+            },
+            seat: Seat::from_str_loose(&self.seat)?,
+            language: language.to_string(),
+            currency: currency.to_uppercase(),
+        })
+    }
+}
 
-    #[arg(long, default_value = "USD", value_name = "CODE", help = "Currency code (e.g. USD, EUR, JPY)")]
-    currency: String,
-
+#[derive(clap::Args)]
+#[command(next_help_heading = "Output")]
+struct OutputArgs {
     #[arg(long, value_name = "N", help = "Show only the N cheapest results")]
     top: Option<usize>,
 
-    #[arg(long, help = "One-line-per-flight output (recommended for scripts and AI agents)")]
+    #[arg(long, help = "One line per result (recommended for scripts and AI agents)")]
     compact: bool,
 
     #[arg(long, help = "Output as JSON")]
@@ -167,12 +277,32 @@ struct SearchArgs {
     #[arg(long, help = "Output as pretty-printed JSON")]
     pretty: bool,
 
-    #[arg(long, help = "Open results in Google Flights")]
-    open: bool,
+    #[arg(
+        long,
+        default_value = "USD",
+        value_name = "CODE",
+        help = "Currency code (e.g. USD, EUR, JPY)"
+    )]
+    currency: String,
+}
 
-    #[arg(long, help = "Output Google Flights URL only (for AI agents)")]
-    url: bool,
+impl OutputArgs {
+    fn is_json(&self) -> bool {
+        self.json || self.pretty
+    }
 
+    fn to_json(&self, value: &impl Serialize) -> String {
+        if self.pretty {
+            serde_json::to_string_pretty(value).unwrap()
+        } else {
+            serde_json::to_string(value).unwrap()
+        }
+    }
+}
+
+#[derive(clap::Args)]
+#[command(next_help_heading = "Connection")]
+struct NetArgs {
     #[arg(long, value_name = "URL", help = "HTTP or SOCKS5 proxy")]
     proxy: Option<String>,
 
@@ -180,43 +310,29 @@ struct SearchArgs {
     timeout: u64,
 }
 
-fn is_json(args: &SearchArgs) -> bool {
-    args.json || args.pretty
-}
-
-fn apply_top(result: &mut SearchResult, n: usize) {
-    result
-        .flights
-        .sort_by_key(|f| f.price.unwrap_or(i64::MAX));
-    result.flights.truncate(n);
-}
-
-fn open_browser(query_params: &QueryParams, json_mode: bool) -> ! {
-    let url = flyr::generate_browser_url(query_params);
-    println!("Opening: {url}");
-    if let Err(e) = open::that(&url) {
-        die(
-            &FlightError::Validation(format!("failed to open browser: {e}")),
-            json_mode,
-        );
+impl NetArgs {
+    fn fetch_options(&self) -> FetchOptions {
+        FetchOptions {
+            proxy: self.proxy.clone(),
+            timeout: self.timeout,
+        }
     }
-    std::process::exit(0);
 }
 
 fn error_code(err: &FlightError) -> i32 {
     match err {
         FlightError::InvalidAirport(_)
         | FlightError::InvalidDate(_)
-        | FlightError::Validation(_) => 2,
+        | FlightError::Validation(_)
+        | FlightError::Rejected(Some(INVALID_ARGUMENT)) => 2,
         FlightError::Timeout
         | FlightError::ConnectionFailed(_)
         | FlightError::DnsResolution(_)
         | FlightError::TlsError(_)
         | FlightError::ProxyError(_) => 3,
-        FlightError::RateLimited | FlightError::Blocked(_) => 4,
+        FlightError::RateLimited | FlightError::Blocked(_) | FlightError::Rejected(_) => 4,
         FlightError::HttpStatus(_) => 5,
         FlightError::ScriptTagNotFound | FlightError::JsParse(_) => 6,
-        FlightError::NoResults => 0,
     }
 }
 
@@ -232,258 +348,247 @@ fn error_kind(err: &FlightError) -> &'static str {
         FlightError::ProxyError(_) => "proxy_error",
         FlightError::RateLimited => "rate_limited",
         FlightError::Blocked(_) => "blocked",
+        FlightError::Rejected(_) => "rejected",
         FlightError::HttpStatus(_) => "http_error",
         FlightError::ScriptTagNotFound => "parse_error",
         FlightError::JsParse(_) => "parse_error",
-        FlightError::NoResults => "no_results",
+    }
+}
+
+fn error_json(err: &FlightError) -> Value {
+    serde_json::json!({
+        "error": {
+            "kind": error_kind(err),
+            "message": err.to_string(),
+        }
+    })
+}
+
+/// Writes a line to stdout, exiting quietly once the reader has gone away, as when
+/// piping into `head`.
+fn emit(text: impl std::fmt::Display) {
+    use std::io::Write;
+
+    if let Err(e) = writeln!(std::io::stdout().lock(), "{text}") {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            process::exit(0);
+        }
+        eprintln!("error: failed to write output: {e}");
+        process::exit(1);
     }
 }
 
 fn die(err: &FlightError, json_mode: bool) -> ! {
     if json_mode {
-        let json = serde_json::json!({
-            "error": {
-                "kind": error_kind(err),
-                "message": err.to_string(),
-            }
-        });
-        println!("{}", serde_json::to_string(&json).unwrap());
+        emit(error_json(err));
     } else {
         eprintln!("error: {err}");
     }
     process::exit(error_code(err));
 }
 
-fn build_legs(args: &SearchArgs) -> Result<Vec<FlightLeg>, FlightError> {
-    let airlines: Option<Vec<String>> = args
-        .airlines
-        .as_ref()
-        .map(|s| s.split(',').map(|a| a.trim().to_uppercase()).collect());
-
-    if !args.leg.is_empty() {
-        let mut legs = Vec::new();
-        for leg_str in &args.leg {
-            let parts: Vec<&str> = leg_str.split_whitespace().collect();
-            if parts.len() != 3 {
-                return Err(FlightError::Validation(format!(
-                    "--leg must be \"DATE FROM TO\", got: \"{leg_str}\""
-                )));
-            }
-            legs.push(FlightLeg {
-                date: parts[0].to_string(),
-                from_airport: parts[1].to_uppercase(),
-                to_airport: parts[2].to_uppercase(),
-                max_stops: args.max_stops,
-                airlines: airlines.clone(),
-            });
-        }
-        return Ok(legs);
-    }
-
-    let from = args
-        .from
-        .as_ref()
-        .ok_or_else(|| FlightError::Validation("--from is required (or use --leg)".into()))?;
-    let to = args
-        .to
-        .as_ref()
-        .ok_or_else(|| FlightError::Validation("--to is required (or use --leg)".into()))?;
-    let date = args
-        .date
-        .as_ref()
-        .ok_or_else(|| FlightError::Validation("--date is required (or use --leg)".into()))?;
-
-    let mut legs = vec![FlightLeg {
-        date: date.clone(),
-        from_airport: from.to_uppercase(),
-        to_airport: to.to_uppercase(),
-        max_stops: args.max_stops,
-        airlines: airlines.clone(),
-    }];
-
-    if let Some(ref ret_date) = args.return_date {
-        legs.push(FlightLeg {
-            date: ret_date.clone(),
-            from_airport: to.to_uppercase(),
-            to_airport: from.to_uppercase(),
-            max_stops: args.max_stops,
-            airlines: airlines.clone(),
-        });
-    }
-
-    Ok(legs)
+fn required<'a>(value: &'a Option<String>, flag: &str) -> Result<&'a str, FlightError> {
+    value
+        .as_deref()
+        .ok_or_else(|| FlightError::Validation(format!("{flag} is required (or use --leg)")))
 }
 
-fn determine_trip(args: &SearchArgs) -> String {
+fn determine_trip(args: &SearchArgs) -> Result<TripType, FlightError> {
+    let trip = TripType::from_str_loose(&args.trip)?;
     if args.return_date.is_some() {
-        return "round-trip".to_string();
+        return Ok(TripType::RoundTrip);
     }
-    if args.leg.len() >= 2 && args.trip == "one-way" {
-        return "multi-city".to_string();
+    if args.leg.len() >= 2 && trip == TripType::OneWay {
+        return Ok(TripType::MultiCity);
     }
-    args.trip.clone()
+    Ok(trip)
 }
 
-fn print_compact(result: &SearchResult, currency: &str) {
-    for flight in &result.flights {
-        let price = table::format_price(flight.price, currency);
-
-        let route: Vec<&str> = std::iter::once(
-            flight
-                .segments
-                .first()
-                .map(|s| s.from_airport.code.as_str())
-                .unwrap_or("?"),
-        )
-        .chain(flight.segments.iter().map(|s| s.to_airport.code.as_str()))
-        .collect();
-        let route_str = route.join(">");
-
-        let duration = if flight.segments.is_empty() {
-            "—".to_string()
-        } else {
-            let total: u32 = flight.segments.iter().map(|s| s.duration_minutes).sum();
-            format!("{}h{:02}m", total / 60, total % 60)
-        };
-
-        let stops = if flight.segments.len() <= 1 {
-            "nonstop".to_string()
-        } else {
-            let n = flight.segments.len() - 1;
-            let codes: Vec<&str> = flight.segments[..n]
-                .iter()
-                .map(|s| s.to_airport.code.as_str())
-                .collect();
-            format!("{n} stop {}", codes.join(","))
-        };
-
-        let airlines = flight.airlines.join(", ");
-
-        let depart = flight.segments.first();
-        let arrive = flight.segments.last();
-        let time_str = match (depart, arrive) {
-            (Some(d), Some(a)) => format!(
-                "{}{:02} {:02}:{:02}>{:02}:{:02}",
-                month_abbr(d.departure.month),
-                d.departure.day,
-                d.departure.hour,
-                d.departure.minute,
-                a.arrival.hour,
-                a.arrival.minute,
-            ),
-            _ => "—".to_string(),
-        };
-
-        println!("{price} | {route_str} | {duration} | {stops} | {airlines} | {time_str}");
+fn parse_leg(leg: &str) -> Result<(String, String, String), FlightError> {
+    match leg.split_whitespace().collect::<Vec<_>>()[..] {
+        [date, from, to] => Ok((date.to_string(), from.to_uppercase(), to.to_uppercase())),
+        _ => Err(FlightError::Validation(format!(
+            "--leg must be \"DATE FROM TO\", got: \"{leg}\""
+        ))),
     }
 }
 
-fn month_abbr(m: u32) -> &'static str {
-    match m {
-        1 => "Jan",
-        2 => "Feb",
-        3 => "Mar",
-        4 => "Apr",
-        5 => "May",
-        6 => "Jun",
-        7 => "Jul",
-        8 => "Aug",
-        9 => "Sep",
-        10 => "Oct",
-        11 => "Nov",
-        12 => "Dec",
-        _ => "???",
-    }
-}
+/// One validated query per destination, or a single query for `--leg` itineraries.
+fn build_queries(args: &SearchArgs) -> Result<Vec<(String, QueryParams)>, FlightError> {
+    let filters = args.filters.to_filters(&args.lang, &args.output.currency)?;
+    let trip = determine_trip(args)?;
 
-fn print_result(result: &SearchResult, args: &SearchArgs) {
-    if args.compact {
-        if result.flights.is_empty() {
-            println!("No flights found.");
-            return;
+    let queries = if !args.leg.is_empty() {
+        if args.to.as_deref().is_some_and(|t| t.contains(',')) {
+            return Err(FlightError::Validation(
+                "--leg cannot be used with comma-separated -t destinations".into(),
+            ));
         }
-        print_compact(result, &args.currency);
-    } else if is_json(args) {
-        let output = if args.pretty {
-            serde_json::to_string_pretty(result).unwrap()
-        } else {
-            serde_json::to_string(result).unwrap()
-        };
-        println!("{output}");
+        let legs = args
+            .leg
+            .iter()
+            .map(|leg| parse_leg(leg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let legs: Vec<(&str, &str, &str)> = legs
+            .iter()
+            .map(|(date, from, to)| (date.as_str(), from.as_str(), to.as_str()))
+            .collect();
+        vec![(String::new(), QueryParams::new(&legs, trip, &filters))]
     } else {
-        if result.flights.is_empty() {
-            println!("No flights found.");
-            return;
+        let from = required(&args.from, "--from")?.trim().to_uppercase();
+        let destinations = parse_codes(required(&args.to, "--to")?);
+        if destinations.is_empty() {
+            return Err(FlightError::Validation("--to is required (or use --leg)".into()));
         }
-        println!("{}", table::render(result, &args.currency));
-    }
-}
+        let date = required(&args.date, "--date")?;
 
-fn is_multi_dest(args: &SearchArgs) -> bool {
-    args.to.as_ref().is_some_and(|t| t.contains(','))
-}
-
-fn parse_destinations(args: &SearchArgs) -> Vec<String> {
-    args.to
-        .as_ref()
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_uppercase())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn build_base_params(
-    args: &SearchArgs,
-) -> Result<(Passengers, Seat, TripType, Option<Vec<String>>), FlightError> {
-    let trip_str = determine_trip(args);
-    let trip = TripType::from_str_loose(&trip_str)?;
-    let seat = Seat::from_str_loose(&args.seat)?;
-    let passengers = Passengers {
-        adults: args.adults,
-        children: args.children,
-        infants_in_seat: args.infants_in_seat,
-        infants_on_lap: args.infants_on_lap,
+        let mut queries =
+            route_queries(&from, &destinations, date, args.return_date.as_deref(), &filters);
+        for (_, query) in &mut queries {
+            query.trip = trip.clone();
+        }
+        queries
     };
-    let airlines: Option<Vec<String>> = args
-        .airlines
-        .as_ref()
-        .map(|s| s.split(',').map(|a| a.trim().to_uppercase()).collect());
-    Ok((passengers, seat, trip, airlines))
+
+    for (_, query) in &queries {
+        query.validate()?;
+    }
+    Ok(queries)
+}
+
+fn print_result(result: &SearchResult, args: &SearchArgs, round_trip: bool) {
+    let currency = args.output.currency.to_uppercase();
+    if args.output.compact {
+        emit(table::compact(result, &currency, round_trip));
+    } else if args.output.is_json() {
+        emit(args.output.to_json(result));
+    } else {
+        emit(table::render(result, &currency, round_trip));
+    }
 }
 
 fn print_multi_result(
-    results: &BTreeMap<String, SearchResult>,
+    outcomes: &[(String, Result<SearchResult, FlightError>)],
     args: &SearchArgs,
+    round_trip: bool,
 ) {
-    if args.compact {
-        for (dest, result) in results {
-            println!("=== {dest} ===");
-            if result.flights.is_empty() {
-                println!("No flights found.");
-            } else {
-                print_compact(result, &args.currency);
-            }
-        }
-    } else if is_json(args) {
-        let output = if args.pretty {
-            serde_json::to_string_pretty(results).unwrap()
-        } else {
-            serde_json::to_string(results).unwrap()
-        };
-        println!("{output}");
+    let currency = args.output.currency.to_uppercase();
+    if args.output.compact {
+        emit(table::sections(outcomes, "\n", |r| {
+            table::compact(r, &currency, round_trip)
+        }));
+    } else if args.output.is_json() {
+        let by_destination: serde_json::Map<String, Value> = outcomes
+            .iter()
+            .map(|(dest, outcome)| {
+                let value = match outcome {
+                    Ok(result) => serde_json::to_value(result).unwrap(),
+                    Err(e) => error_json(e),
+                };
+                (dest.clone(), value)
+            })
+            .collect();
+        emit(args.output.to_json(&by_destination));
     } else {
-        for (dest, result) in results {
-            println!("=== {dest} ===");
-            if result.flights.is_empty() {
-                println!("No flights found.");
-            } else {
-                println!("{}", table::render(result, &args.currency));
+        emit(table::sections(outcomes, "\n\n", |r| {
+            table::render(r, &currency, round_trip)
+        }));
+    }
+}
+
+async fn run_search(args: SearchArgs) {
+    let json_mode = args.output.is_json();
+    let queries = build_queries(&args).unwrap_or_else(|e| die(&e, json_mode));
+
+    if args.url || args.open {
+        for (_, query) in &queries {
+            let url = flyr::generate_browser_url(query);
+            if args.url {
+                emit(&url);
+                continue;
             }
-            println!();
+            emit(format!("Opening: {url}"));
+            if let Err(e) = open::that(&url) {
+                die(
+                    &FlightError::Validation(format!("failed to open browser: {e}")),
+                    json_mode,
+                );
+            }
         }
+        return;
+    }
+
+    let options = args.net.fetch_options();
+    let round_trip = queries.iter().all(|(_, q)| q.trip == TripType::RoundTrip);
+
+    if let [(_, query)] = &queries[..] {
+        match flyr::search(query, &options).await {
+            Ok(mut result) => {
+                if let Some(n) = args.output.top {
+                    result.keep_cheapest(n);
+                }
+                print_result(&result, &args, round_trip);
+            }
+            Err(e) => die(&e, json_mode),
+        }
+        return;
+    }
+
+    let mut outcomes = flyr::search_all(queries, &options).await;
+    if let Some(n) = args.output.top {
+        for result in outcomes.iter_mut().filter_map(|(_, o)| o.as_mut().ok()) {
+            result.keep_cheapest(n);
+        }
+    }
+    print_multi_result(&outcomes, &args, round_trip);
+
+    if let Some(err) = all_failed(&outcomes) {
+        process::exit(error_code(err));
+    }
+}
+
+/// The first error when every destination failed; partial failures are reported inline
+/// and still exit successfully.
+fn all_failed(outcomes: &[(String, Result<SearchResult, FlightError>)]) -> Option<&FlightError> {
+    let mut errors = outcomes.iter().map(|(_, o)| o.as_ref().err());
+    let first = errors.next()??;
+    errors.all(|e| e.is_some()).then_some(first)
+}
+
+fn build_date_query(args: &DatesArgs) -> Result<DateQuery, FlightError> {
+    let filters = args.filters.to_filters("en", &args.output.currency)?;
+    let (start, end) = parse_date_range(&args.date)?;
+    let query = DateQuery {
+        from_airport: args.from.trim().to_uppercase(),
+        to_airport: args.to.trim().to_uppercase(),
+        start,
+        end,
+        stay_days: args.stay,
+        filters,
+    };
+    query.validate()?;
+    Ok(query)
+}
+
+async fn run_dates(args: DatesArgs) {
+    let json_mode = args.output.is_json();
+    let query = build_date_query(&args).unwrap_or_else(|e| die(&e, json_mode));
+
+    let mut dates = match flyr::search_dates(&query, &args.net.fetch_options()).await {
+        Ok(dates) => dates,
+        Err(e) => die(&e, json_mode),
+    };
+    if let Some(n) = args.output.top {
+        keep_cheapest_dates(&mut dates, n);
+    }
+
+    let currency = &query.filters.currency;
+    if args.output.compact {
+        emit(table::compact_dates(&dates, currency));
+    } else if json_mode {
+        emit(args.output.to_json(&dates));
+    } else {
+        emit(table::render_dates(&dates, currency));
     }
 }
 
@@ -492,249 +597,26 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Search(args) => run_search(args).await,
+        Commands::Dates(args) => run_dates(args).await,
         Commands::Mcp => flyr::mcp::run().await,
-        Commands::Search(args) => {
-            let json_mode = is_json(&args);
+    }
+}
 
-            if is_multi_dest(&args) {
-                if !args.leg.is_empty() {
-                    die(
-                        &FlightError::Validation(
-                            "--leg cannot be used with comma-separated -t destinations".into(),
-                        ),
-                        json_mode,
-                    );
-                }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-                let from = match args.from.as_ref() {
-                    Some(f) => f.to_uppercase(),
-                    None => die(
-                        &FlightError::Validation("--from is required (or use --leg)".into()),
-                        json_mode,
-                    ),
-                };
-                let date = match args.date.as_ref() {
-                    Some(d) => d.clone(),
-                    None => die(
-                        &FlightError::Validation("--date is required (or use --leg)".into()),
-                        json_mode,
-                    ),
-                };
+    fn outcome(ok: bool) -> (String, Result<SearchResult, FlightError>) {
+        let result = if ok { Ok(SearchResult::default()) } else { Err(FlightError::RateLimited) };
+        (String::new(), result)
+    }
 
-                let (passengers, seat, _trip, airlines) = match build_base_params(&args) {
-                    Ok(p) => p,
-                    Err(e) => die(&e, json_mode),
-                };
-
-                let destinations = parse_destinations(&args);
-                let fetch_options = FetchOptions {
-                    proxy: args.proxy.clone(),
-                    timeout: args.timeout,
-                };
-
-                if args.open {
-                    let from = match args.from.as_ref() {
-                        Some(f) => f.to_uppercase(),
-                        None => die(
-                            &FlightError::Validation("--from is required (or use --leg)".into()),
-                            json_mode,
-                        ),
-                    };
-                    let date = match args.date.as_ref() {
-                        Some(d) => d.clone(),
-                        None => die(
-                            &FlightError::Validation("--date is required (or use --leg)".into()),
-                            json_mode,
-                        ),
-                    };
-
-                    let trip = if args.return_date.is_some() {
-                        TripType::RoundTrip
-                    } else {
-                        TripType::OneWay
-                    };
-
-                    for dest in &destinations {
-                        let mut legs = vec![FlightLeg {
-                            date: date.clone(),
-                            from_airport: from.clone(),
-                            to_airport: dest.clone(),
-                            max_stops: args.max_stops,
-                            airlines: airlines.clone(),
-                        }];
-
-                        if args.return_date.is_some() {
-                            legs.push(FlightLeg {
-                                date: args.return_date.clone().unwrap(),
-                                from_airport: dest.clone(),
-                                to_airport: from.clone(),
-                                max_stops: args.max_stops,
-                                airlines: airlines.clone(),
-                            });
-                        }
-
-                        let query_params = QueryParams {
-                            legs,
-                            passengers: passengers.clone(),
-                            seat: seat.clone(),
-                            trip: trip.clone(),
-                            language: args.lang.clone(),
-                            currency: args.currency.clone(),
-                        };
-
-                        let url = flyr::generate_browser_url(&query_params);
-                        if args.url {
-                            println!("{url}");
-                        } else {
-                            println!("Opening: {url}");
-                            let _ = open::that(&url);
-                        }
-                    }
-                    return;
-                }
-
-                let mut join_set = JoinSet::new();
-
-                for dest in &destinations {
-                    let mut legs = vec![FlightLeg {
-                        date: date.clone(),
-                        from_airport: from.clone(),
-                        to_airport: dest.clone(),
-                        max_stops: args.max_stops,
-                        airlines: airlines.clone(),
-                    }];
-
-                    let trip = if args.return_date.is_some() {
-                        legs.push(FlightLeg {
-                            date: args.return_date.clone().unwrap(),
-                            from_airport: dest.clone(),
-                            to_airport: from.clone(),
-                            max_stops: args.max_stops,
-                            airlines: airlines.clone(),
-                        });
-                        TripType::RoundTrip
-                    } else {
-                        TripType::OneWay
-                    };
-
-                    let query_params = QueryParams {
-                        legs,
-                        passengers: passengers.clone(),
-                        seat: seat.clone(),
-                        trip,
-                        language: args.lang.clone(),
-                        currency: args.currency.clone(),
-                    };
-
-                if args.open {
-                    open_browser(&query_params, json_mode);
-                }
-
-                if args.url {
-                    let url = flyr::generate_browser_url(&query_params);
-                    println!("{url}");
-                    std::process::exit(0);
-                }
-
-                if let Err(e) = query_params.validate() {
-                        die(&e, json_mode);
-                    }
-
-                    let opts = fetch_options.clone();
-                    let dest_code = dest.clone();
-                    join_set.spawn(async move {
-                        let result =
-                            flyr::search(SearchQuery::Structured(query_params), opts).await;
-                        (dest_code, result)
-                    });
-                }
-
-                let mut results: BTreeMap<String, SearchResult> = BTreeMap::new();
-
-                while let Some(join_result) = join_set.join_next().await {
-                    let (dest_code, search_result) = join_result.unwrap();
-                    match search_result {
-                        Ok(mut result) => {
-                            if let Some(n) = args.top {
-                                apply_top(&mut result, n);
-                            }
-                            results.insert(dest_code, result);
-                        }
-                        Err(e) => {
-                            if json_mode {
-                                let mut error_result = SearchResult::default();
-                                error_result.flights = vec![];
-                                results.insert(dest_code.clone(), error_result);
-                                eprintln!("warning: {dest_code}: {e}");
-                            } else {
-                                eprintln!("error: {dest_code}: {e}");
-                            }
-                        }
-                    }
-                }
-
-                print_multi_result(&results, &args);
-            } else {
-                let legs = match build_legs(&args) {
-                    Ok(l) => l,
-                    Err(e) => die(&e, json_mode),
-                };
-
-                let trip_str = determine_trip(&args);
-                let trip = match TripType::from_str_loose(&trip_str) {
-                    Ok(t) => t,
-                    Err(e) => die(&e, json_mode),
-                };
-                let seat = match Seat::from_str_loose(&args.seat) {
-                    Ok(s) => s,
-                    Err(e) => die(&e, json_mode),
-                };
-
-                let passengers = Passengers {
-                    adults: args.adults,
-                    children: args.children,
-                    infants_in_seat: args.infants_in_seat,
-                    infants_on_lap: args.infants_on_lap,
-                };
-
-                let query_params = QueryParams {
-                    legs,
-                    passengers,
-                    seat,
-                    trip,
-                    language: args.lang.clone(),
-                    currency: args.currency.clone(),
-                };
-
-                if args.open {
-                    open_browser(&query_params, json_mode);
-                }
-
-                if args.url {
-                    let url = flyr::generate_browser_url(&query_params);
-                    println!("{url}");
-                    std::process::exit(0);
-                }
-
-                if let Err(e) = query_params.validate() {
-                    die(&e, json_mode);
-                }
-
-                let fetch_options = FetchOptions {
-                    proxy: args.proxy.clone(),
-                    timeout: args.timeout,
-                };
-
-                match flyr::search(SearchQuery::Structured(query_params), fetch_options).await {
-                    Ok(mut result) => {
-                        if let Some(n) = args.top {
-                            apply_top(&mut result, n);
-                        }
-                        print_result(&result, &args);
-                    }
-                    Err(e) => die(&e, json_mode),
-                }
-            }
-        }
+    #[test]
+    fn exit_fails_only_when_every_destination_fails() {
+        assert!(all_failed(&[outcome(false), outcome(false)]).is_some());
+        assert!(all_failed(&[outcome(false), outcome(true)]).is_none());
+        assert!(all_failed(&[outcome(true), outcome(false)]).is_none());
+        assert!(all_failed(&[]).is_none());
     }
 }

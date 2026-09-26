@@ -18,6 +18,7 @@ fn cache_buster() -> String {
 }
 
 const BASE_URL: &str = "https://www.google.com/travel/flights";
+const CALENDAR_URL: &str = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetCalendarGraph";
 const MAX_REDIRECTS: u8 = 10;
 
 #[derive(Clone)]
@@ -92,13 +93,7 @@ async fn follow_redirects(client: &Client, start_url: &str) -> Result<String, Fl
             continue;
         }
 
-        match status {
-            200 => {}
-            429 => return Err(FlightError::RateLimited),
-            403 | 503 => return Err(FlightError::Blocked(status)),
-            s if s >= 400 => return Err(FlightError::HttpStatus(s)),
-            _ => {}
-        }
+        check_status(status)?;
 
         let html = response.text().await.map_err(error::from_http_error)?;
 
@@ -126,10 +121,7 @@ async fn follow_redirects(client: &Client, start_url: &str) -> Result<String, Fl
     Err(FlightError::Blocked(302))
 }
 
-pub async fn fetch_html(
-    params: &[(String, String)],
-    options: &FetchOptions,
-) -> Result<String, FlightError> {
+fn client(options: &FetchOptions) -> Result<Client, FlightError> {
     let jar = Arc::new(Jar::default());
 
     let mut builder = Client::builder()
@@ -143,7 +135,23 @@ pub async fn fetch_html(
         );
     }
 
-    let client = builder.build().map_err(error::from_http_error)?;
+    builder.build().map_err(error::from_http_error)
+}
+
+fn check_status(status: u16) -> Result<(), FlightError> {
+    match status {
+        429 => Err(FlightError::RateLimited),
+        403 | 503 => Err(FlightError::Blocked(status)),
+        s if s >= 400 => Err(FlightError::HttpStatus(s)),
+        _ => Ok(()),
+    }
+}
+
+pub async fn fetch_html(
+    params: &[(String, String)],
+    options: &FetchOptions,
+) -> Result<String, FlightError> {
+    let client = client(options)?;
 
     let mut params = params.to_vec();
     params.push(("cx".to_string(), cache_buster()));
@@ -159,4 +167,34 @@ pub async fn fetch_html(
     }
 
     follow_redirects(&client, &start_url).await
+}
+
+/// Posts a date-grid request to Google's `GetCalendarGraph` RPC and returns the raw body.
+pub async fn fetch_calendar(
+    body: String,
+    currency: &str,
+    language: &str,
+    options: &FetchOptions,
+) -> Result<String, FlightError> {
+    let url = format!(
+        "{CALENDAR_URL}?curr={}&hl={}",
+        urlencoding::encode(currency),
+        urlencoding::encode(language)
+    );
+
+    let response = client(options)?
+        .post(&url)
+        .header("content-type", "application/x-www-form-urlencoded;charset=UTF-8")
+        .body(body)
+        .send()
+        .await
+        .map_err(error::from_http_error)?;
+
+    let status = response.status().as_u16();
+    if is_redirect(status) {
+        return Err(FlightError::Blocked(status));
+    }
+    check_status(status)?;
+
+    response.text().await.map_err(error::from_http_error)
 }

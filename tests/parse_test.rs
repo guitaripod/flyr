@@ -1,4 +1,5 @@
-use flyr::parse::{extract_script, parse_html, parse_js, parse_payload};
+use flyr::model::{DatePrice, SearchResult};
+use flyr::parse::{extract_script, parse_calendar, parse_html, parse_js, parse_payload};
 use serde_json::json;
 
 #[test]
@@ -254,4 +255,194 @@ fn parse_segment_missing_airport_name() {
     assert_eq!(result.flights[0].segments.len(), 1);
     assert_eq!(result.flights[0].segments[0].from_airport.code, "JFK");
     assert_eq!(result.flights[0].segments[0].from_airport.name, "");
+}
+
+#[test]
+fn parse_segment_null_hour_is_midnight() {
+    let mut seg = vec![serde_json::Value::Null; 22];
+    seg[3] = json!("HEL");
+    seg[6] = json!("DXB");
+    seg[8] = json!([15, 45]);
+    seg[10] = json!([null, 20]);
+    seg[11] = json!(395);
+    seg[20] = json!([2026, 11, 2]);
+    seg[21] = json!([2026, 11, 3]);
+
+    let entry = make_flight_entry(vec![json!(seg)]);
+    let payload = json!([null, null, null, [[entry]], null, null, null, [null, [[], []]]]);
+
+    let result = parse_payload(&payload).unwrap();
+    let s = &result.flights[0].segments[0];
+    assert_eq!((s.arrival.hour, s.arrival.minute), (0, 20));
+}
+
+#[test]
+fn layovers_fall_back_to_segment_times() {
+    let mut first = make_segment();
+    first[6] = json!("LGW");
+    first[10] = json!([14, 45]);
+    let mut second = make_segment();
+    second[3] = json!("LHR");
+    second[8] = json!([17, 15]);
+
+    let entry = make_flight_entry(vec![first, second]);
+    let payload = json!([null, null, null, [[entry]], null, null, null, [null, [[], []]]]);
+
+    let flight = &parse_payload(&payload).unwrap().flights[0];
+    assert_eq!(flight.layovers.len(), 1);
+    let layover = &flight.layovers[0];
+    assert_eq!(layover.airport, "LGW");
+    assert_eq!(layover.duration_minutes, 150);
+    assert!(layover.change_of_airport);
+    assert!(!layover.overnight);
+    assert_eq!(flight.duration_minutes, 255 + 150 + 255);
+}
+
+fn fixture(name: &str) -> SearchResult {
+    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let payload: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    parse_payload(&payload).unwrap()
+}
+
+fn find<'a>(result: &'a SearchResult, first_flight: &str) -> &'a flyr::model::FlightResult {
+    result
+        .flights
+        .iter()
+        .find(|f| f.segments[0].flight_number.as_deref() == Some(first_flight))
+        .unwrap_or_else(|| panic!("no flight starting with {first_flight}"))
+}
+
+#[test]
+fn real_page_includes_top_flights() {
+    let mut result = fixture("lhr_jfk_2026-11-01.json");
+    assert_eq!(result.flights.len(), 21);
+    assert_eq!(result.flights[0].price, Some(450));
+
+    result.keep_cheapest(1);
+    let cheapest = &result.flights[0];
+    assert_eq!(cheapest.price, Some(450));
+    assert_eq!(cheapest.segments[0].flight_number.as_deref(), Some("B62220"));
+}
+
+#[test]
+fn real_page_duration_includes_layovers() {
+    let result = fixture("lhr_jfk_2026-11-01.json");
+    let flight = find(&result, "FI455");
+
+    let flying: u32 = flight.segments.iter().map(|s| s.duration_minutes).sum();
+    assert_eq!(flying, 565);
+    assert_eq!(flight.duration_minutes, 1585);
+    assert_eq!(flight.layovers.len(), 1);
+    assert_eq!(flight.layovers[0].airport, "KEF");
+    assert_eq!(flight.layovers[0].duration_minutes, 1020);
+    assert!(flight.layovers[0].overnight);
+    assert!(!flight.layovers[0].change_of_airport);
+    assert!(result.cheaper_date.is_none());
+}
+
+#[test]
+fn real_page_keeps_segments_at_midnight() {
+    let result = fixture("hel_bkk_2026-11-02.json");
+    assert_eq!(result.flights.len(), 11);
+    assert!(result.flights.iter().all(|f| !f.segments.is_empty()));
+
+    let emirates = find(&result, "EK168");
+    assert_eq!(emirates.segments.len(), 2);
+    assert_eq!(emirates.segments[0].to_airport.code, "DXB");
+    assert_eq!((emirates.segments[0].arrival.hour, emirates.segments[0].arrival.minute), (0, 20));
+
+    let finnair = find(&result, "AY145");
+    assert_eq!((finnair.segments[0].departure.hour, finnair.segments[0].departure.minute), (0, 15));
+}
+
+#[test]
+fn real_page_three_segment_itinerary() {
+    let result = fixture("hel_bkk_2026-11-02.json");
+    let flight = find(&result, "SK1705");
+
+    let numbers: Vec<_> = flight.segments.iter().filter_map(|s| s.flight_number.as_deref()).collect();
+    assert_eq!(numbers, ["SK1705", "EY178", "EY406"]);
+    assert_eq!(flight.segments[0].codeshares, ["EY3986"]);
+    assert_eq!(flight.duration_minutes, 1830);
+
+    let layovers: Vec<_> = flight
+        .layovers
+        .iter()
+        .map(|l| (l.airport.as_str(), l.duration_minutes, l.overnight))
+        .collect();
+    assert_eq!(layovers, [("CPH", 190, false), ("AUH", 780, true)]);
+}
+
+#[test]
+fn real_page_cheaper_date_hint() {
+    let one_way = fixture("hel_bkk_2026-11-02.json");
+    assert_eq!(
+        one_way.cheaper_date,
+        Some(DatePrice { date: "2026-11-03".into(), return_date: None, price: 354 })
+    );
+
+    let round_trip = fixture("hel_bcn_2026-11-02_2026-11-09.json");
+    assert_eq!(round_trip.flights.len(), 9);
+    assert_eq!(round_trip.flights.iter().filter_map(|f| f.price).min(), Some(297));
+    assert_eq!(
+        round_trip.cheaper_date,
+        Some(DatePrice {
+            date: "2026-11-03".into(),
+            return_date: Some("2026-11-10".into()),
+            price: 215,
+        })
+    );
+}
+
+fn calendar_fixture(name: &str) -> Result<Vec<DatePrice>, flyr::error::FlightError> {
+    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    parse_calendar(&std::fs::read_to_string(path).unwrap())
+}
+
+#[test]
+fn calendar_one_way() {
+    let dates = calendar_fixture("calendar_hel_bkk_oneway.txt").unwrap();
+    assert_eq!(dates.len(), 6);
+    assert_eq!(dates[0].date, "2026-11-01");
+    assert_eq!(dates[2], DatePrice { date: "2026-11-03".into(), return_date: None, price: 354 });
+}
+
+#[test]
+fn calendar_round_trip() {
+    let dates = calendar_fixture("calendar_hel_bcn_roundtrip.txt").unwrap();
+    assert_eq!(dates.len(), 30);
+    assert_eq!(
+        dates[0],
+        DatePrice { date: "2026-11-01".into(), return_date: Some("2026-11-08".into()), price: 314 }
+    );
+    assert!(dates.windows(2).all(|w| w[0].date < w[1].date));
+}
+
+#[test]
+fn calendar_rejection_carries_code() {
+    let err = calendar_fixture("calendar_rejected.txt").unwrap_err();
+    assert!(matches!(
+        err,
+        flyr::error::FlightError::Rejected(Some(flyr::error::INVALID_ARGUMENT))
+    ));
+}
+
+#[test]
+fn calendar_without_envelope_is_parse_error() {
+    let err = parse_calendar(")]}'\n\n[[\"di\",31]]").unwrap_err();
+    assert!(matches!(err, flyr::error::FlightError::JsParse(_)));
+}
+
+#[test]
+fn real_page_overnight_means_crossing_midnight() {
+    let result = fixture("hel_bkk_2026-11-02.json");
+
+    let qatar = find(&result, "QR302");
+    assert_eq!(qatar.layovers[0].airport, "DOH");
+    assert!(qatar.layovers[0].overnight);
+
+    let turkish = find(&result, "TK1762");
+    assert_eq!(turkish.layovers[0].airport, "IST");
+    assert!(!turkish.layovers[0].overnight);
 }

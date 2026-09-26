@@ -485,3 +485,210 @@ fn mcp_help_shows_description() {
         .stdout(predicate::str::contains("MCP"))
         .stdout(predicate::str::contains("stdio"));
 }
+
+#[test]
+fn dates_help_shows_usage() {
+    cmd()
+        .args(["dates", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("-d, --date <RANGE>"))
+        .stdout(predicate::str::contains("--stay <DAYS>"))
+        .stdout(predicate::str::contains("YYYY-MM-DD..YYYY-MM-DD"))
+        .stdout(predicate::str::contains("Whole month:"))
+        .stdout(predicate::str::contains("City codes like LON aren't supported"));
+}
+
+#[test]
+fn top_level_help_lists_dates() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dates"))
+        .stdout(predicate::str::contains("flyr dates -f HEL -t BCN -d 2026-03 --stay 7"));
+}
+
+#[test]
+fn multi_destination_url_prints_every_url() {
+    let output = cmd()
+        .args(["search", "-f", "HEL", "-t", "BCN,ATH,AYT", "-d", "2099-03-01", "--url"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    let urls: Vec<&str> = stdout.lines().collect();
+    assert_eq!(urls.len(), 3);
+    assert!(urls
+        .iter()
+        .all(|u| u.starts_with("https://www.google.com/travel/flights/search?tfs=")));
+    assert_ne!(urls[0], urls[1]);
+}
+
+#[test]
+fn url_is_validated_first() {
+    cmd()
+        .args(["search", "-f", "X1", "-t", "BCN", "-d", "2099-03-01", "--url"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid airport code"));
+}
+
+#[test]
+fn multi_destination_failures_are_reported() {
+    let output = cmd()
+        .args([
+            "search", "-f", "HEL", "-t", "BCN,ATH", "-d", "2099-03-01", "--json", "--proxy",
+            "http://127.0.0.1:9", "--timeout", "3",
+        ])
+        .assert()
+        .code(3);
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    for dest in ["BCN", "ATH"] {
+        assert!(parsed[dest]["error"]["kind"].is_string(), "{dest} should carry its error");
+    }
+}
+
+#[test]
+fn multi_destination_failures_show_in_compact_output() {
+    cmd()
+        .args([
+            "search", "-f", "HEL", "-t", "BCN,ATH", "-d", "2099-03-01", "--compact", "--proxy",
+            "http://127.0.0.1:9", "--timeout", "3",
+        ])
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("=== BCN ===\nerror: "))
+        .stdout(predicate::str::contains("=== ATH ===\nerror: "));
+}
+
+#[test]
+fn round_trip_without_return_date_fails() {
+    cmd()
+        .args(["search", "-f", "HEL", "-t", "BCN", "-d", "2099-03-01", "--trip", "round-trip"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("round-trip needs"));
+}
+
+#[test]
+fn return_before_departure_fails() {
+    cmd()
+        .args(["search", "-f", "HEL", "-t", "BCN", "-d", "2099-03-08", "--return-date", "2099-03-01"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("departs before the previous leg"));
+}
+
+#[test]
+fn dates_rejects_bad_range() {
+    cmd()
+        .args(["dates", "-f", "HEL", "-t", "BCN", "-d", "2099-13"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid date range"));
+}
+
+#[test]
+fn dates_rejects_past_range() {
+    let output = cmd()
+        .args(["dates", "-f", "HEL", "-t", "BCN", "-d", "2020-01", "--json"])
+        .assert()
+        .code(2);
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON error");
+    assert_eq!(parsed["error"]["kind"], "validation_error");
+    assert!(parsed["error"]["message"].as_str().unwrap().contains("in the past"));
+}
+
+/// Talks JSON-RPC to `flyr mcp` one request at a time, as MCP clients do: the server
+/// stops reading once stdin closes, so requests can't all be written up front.
+struct McpSession {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+}
+
+impl McpSession {
+    fn start() -> Self {
+        let mut child = std::process::Command::new(assert_cmd::cargo_bin!("flyr"))
+            .arg("mcp")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut session = Self { child, stdin, stdout };
+        session.request(serde_json::json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}
+        }));
+        session.send(serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+        session
+    }
+
+    fn send(&mut self, message: serde_json::Value) {
+        use std::io::Write;
+        writeln!(self.stdin, "{message}").unwrap();
+        self.stdin.flush().unwrap();
+    }
+
+    fn request(&mut self, message: serde_json::Value) -> serde_json::Value {
+        use std::io::BufRead;
+        self.send(message);
+        let mut line = String::new();
+        self.stdout.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).expect("JSON-RPC reply")
+    }
+}
+
+impl Drop for McpSession {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn mcp_lists_tools_and_builds_filtered_urls() {
+    let mut mcp = McpSession::start();
+
+    let listing = mcp.request(serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let tools = listing["result"]["tools"].as_array().unwrap();
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 3);
+    for name in ["flyr_search", "flyr_dates", "flyr_get_url"] {
+        assert!(names.contains(&name), "missing tool {name}");
+    }
+    let get_url = tools.iter().find(|t| t["name"] == "flyr_get_url").unwrap();
+    let properties = get_url["inputSchema"]["properties"].as_object().unwrap();
+    for field in ["max_stops", "airlines", "children", "open"] {
+        assert!(properties.contains_key(field), "flyr_get_url lacks {field}");
+    }
+
+    let call = mcp.request(serde_json::json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "flyr_get_url", "arguments": {"from": "HEL", "to": "BCN,ATH", "date": "2099-03-01", "max_stops": 0}}
+    }));
+    let text = call["result"]["content"][0]["text"].as_str().unwrap();
+    assert_eq!(text.lines().count(), 2);
+
+    let nonstop = cmd()
+        .args(["search", "-f", "HEL", "-t", "BCN", "-d", "2099-03-01", "--max-stops", "0", "--url"])
+        .output()
+        .unwrap();
+    assert_eq!(text.lines().next().unwrap(), String::from_utf8_lossy(&nonstop.stdout).trim());
+}
+
+#[test]
+fn mcp_reports_validation_errors() {
+    let mut mcp = McpSession::start();
+    let call = mcp.request(serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "flyr_dates", "arguments": {"from": "HEL", "to": "BCN", "start_date": "2020-01-01", "end_date": "2020-01-31"}}
+    }));
+    assert_eq!(call["result"]["isError"], true);
+    assert!(call["result"]["content"][0]["text"].as_str().unwrap().contains("in the past"));
+}

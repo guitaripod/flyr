@@ -2,6 +2,7 @@
 name = "flyr-cli"
 version = "1.6.2"
 edition = "2021"
+rust-version = "1.89"
 description = "Search Google Flights from the terminal"
 license = "GPL-3.0"
 repository = "https://github.com/guitaripod/flyr"

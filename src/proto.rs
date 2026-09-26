@@ -59,23 +59,6 @@ fn encode_flight_data(leg: &FlightLeg) -> Vec<u8> {
     buf
 }
 
-fn seat_to_varint(seat: &Seat) -> u64 {
-    match seat {
-        Seat::Economy => 1,
-        Seat::PremiumEconomy => 2,
-        Seat::Business => 3,
-        Seat::First => 4,
-    }
-}
-
-fn trip_to_varint(trip: &TripType) -> u64 {
-    match trip {
-        TripType::RoundTrip => 1,
-        TripType::OneWay => 2,
-        TripType::MultiCity => 3,
-    }
-}
-
 fn passengers_to_enums(p: &Passengers) -> Vec<u64> {
     let mut vals = Vec::new();
     vals.extend(std::iter::repeat_n(1, p.adults as usize));
@@ -110,10 +93,10 @@ pub fn encode(
     }
 
     encode_tag(9, 0, &mut buf);
-    encode_varint(seat_to_varint(seat), &mut buf);
+    encode_varint(seat.code(), &mut buf);
 
     encode_tag(19, 0, &mut buf);
-    encode_varint(trip_to_varint(trip), &mut buf);
+    encode_varint(trip.code(), &mut buf);
 
     buf
 }

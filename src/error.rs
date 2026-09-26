@@ -1,5 +1,8 @@
 use std::fmt;
 
+/// Google's status code for a request it considers malformed or unsatisfiable.
+pub const INVALID_ARGUMENT: i64 = 3;
+
 #[derive(Debug)]
 pub enum FlightError {
     Timeout,
@@ -12,7 +15,7 @@ pub enum FlightError {
     TlsError(String),
     ScriptTagNotFound,
     JsParse(String),
-    NoResults,
+    Rejected(Option<i64>),
     InvalidAirport(String),
     InvalidDate(String),
     Validation(String),
@@ -67,7 +70,17 @@ impl fmt::Display for FlightError {
                 "failed to parse flight data from response — {detail}. \
                  This may indicate a Google Flights format change"
             ),
-            Self::NoResults => write!(f, "no flights found for this search"),
+            Self::Rejected(Some(INVALID_ARGUMENT)) => write!(
+                f,
+                "Google rejected the date search — use airport codes (city codes like LON \
+                 aren't supported for date searches) and a date range that isn't in the past"
+            ),
+            Self::Rejected(code) => write!(
+                f,
+                "Google refused the date search (error {}) — try again later, \
+                 or search single dates with `flyr search`",
+                code.map_or_else(|| "unknown".to_string(), |c| c.to_string())
+            ),
             Self::InvalidAirport(code) => write!(
                 f,
                 "invalid airport code \"{code}\" — must be exactly 3 letters (e.g. JFK, HEL, NRT)"
