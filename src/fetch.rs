@@ -125,7 +125,7 @@ fn client(options: &FetchOptions) -> Result<Client, FlightError> {
     let jar = Arc::new(Jar::default());
 
     let mut builder = Client::builder()
-        .emulation(Emulation::Chrome137)
+        .emulation(Emulation::Chrome149)
         .cookie_provider(jar)
         .timeout(Duration::from_secs(options.timeout));
 

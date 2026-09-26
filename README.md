@@ -367,7 +367,7 @@ In human mode, errors go to stderr.
 
 1. **Query encoding** -- Flight parameters are protobuf-encoded (hand-rolled encoder, ~130 LOC) and base64-encoded into the `tfs` URL parameter, matching what Google Flights expects.
 
-2. **HTTP request** -- Uses [wreq](https://github.com/nickel-org/wreq) (reqwest fork) with Chrome 137 TLS fingerprint emulation to avoid bot detection. Automatically handles Google's EU consent wall by detecting consent redirects and submitting the acceptance form.
+2. **HTTP request** -- Uses [wreq](https://github.com/nickel-org/wreq) (reqwest fork) with Chrome 149 TLS fingerprint emulation to avoid bot detection. Automatically handles Google's EU consent wall by detecting consent redirects and submitting the acceptance form.
 
 3. **HTML parsing** -- Extracts the `<script class="ds:1">` tag, isolates the `data:` JSON payload, parses with serde_json.
 
